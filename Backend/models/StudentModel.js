@@ -6,6 +6,11 @@ const studentSchema = mongoose.Schema({
 type:String,
 required:true,
     },
+    email:{
+        type:String,
+        required:true,
+        unique:true,
+    },
     instituteId:{
         type:mongoose.Schema.ObjectId,
         required:true,
@@ -32,12 +37,14 @@ required:true,
     phoneNo:{
         type:String,
         required:true,
+        unique:true,
     },
     rollNo:{
         type:String,
         required:true,
+        unique:true
     },
-    class:{
+    standard:{
         type:String,
         required:true,
     },
