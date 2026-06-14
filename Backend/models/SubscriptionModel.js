@@ -23,6 +23,8 @@ const subscriptionSchema = mongoose.Schema({
     }
 })
 
+module.exports = mongoose.model("Subscription", subscriptionSchema);
+
 
 
 
