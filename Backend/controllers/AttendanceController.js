@@ -1,4 +1,7 @@
+const mongoose = require("mongoose");
 const Attendance = require("../models/AttendanceModel");
+const Parent = require("../models/ParentModel");
+const sendNotification = require("../utils/sendNotifications");
 
 // Mark student attendance
 exports.markAttendance = async (req, res) => {
@@ -43,6 +46,25 @@ exports.markAttendance = async (req, res) => {
     });
 
     await newAttendance.save();
+
+    // Trigger asynchronous FCM notification to parent
+    if (parentId) {
+      Parent.findById(parentId)
+        .then(async (parent) => {
+          if (parent && parent.fcmToken) {
+            const student = await mongoose.model("Student").findById(studentId);
+            const studentName = student ? student.name : "Your child";
+            const statusText = attendance === "present" ? "Present ✅" : "Absent ❌";
+            
+            await sendNotification(
+              parent.fcmToken,
+              "Attendance Status Update 🔔",
+              `${studentName} was marked ${statusText} for the bus route.`
+            );
+          }
+        })
+        .catch((err) => console.error("Failed to send attendance FCM notification:", err));
+    }
 
     return res.status(201).json({
       success: true,

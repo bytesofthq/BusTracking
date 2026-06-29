@@ -37,3 +37,6 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Firebase / GCP secrets
+Backend/serviceAccountKey.json

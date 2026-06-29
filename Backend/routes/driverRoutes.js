@@ -5,6 +5,7 @@ const { protect, authorize } = require('../middlewares/auth');
 
 // Public routes (no authentication required)
 router.post('/login', driverController.driverLogin);
+router.post('/refresh-token', driverController.driverRefreshToken);
 
 // All routes below this require authentication
 router.use(protect);

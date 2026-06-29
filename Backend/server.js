@@ -14,16 +14,18 @@ const parentRoutes = require("./routes/ParentRoutes");
 const planRoutes = require("./routes/PlanRoutes");
 const subscriptionRoutes = require("./routes/SubscriptionRoutes");
 const attendanceRoutes = require("./routes/AttendanceRoutes");
+const messageRoutes = require("./routes/messageRoutes");
 
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 4000;
 
 
+
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 const allowedOrigins = [
-  "http://localhost:5173", 
-  FRONTEND_URL, 
+  "http://localhost:5173",
+  FRONTEND_URL,
 ];
 
 const corsOptions = {
@@ -66,6 +68,7 @@ app.use("/api/institute", instituteRoutes);
 app.use("/api/plan", planRoutes);
 app.use("/api/subscription", subscriptionRoutes);
 app.use("/api/attendance", attendanceRoutes);
+app.use("/api/message", messageRoutes);
 
 
 
@@ -101,7 +104,7 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`Server started on port ${PORT}`);
+  console.log(`Server started on port ${PORT}`);
 });
 
 mongoose.connect(process.env.MONGODB_URI)

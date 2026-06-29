@@ -92,7 +92,7 @@ exports.driverLogin = catchAsync(async (req, res, next) => {
         return next(new AppError('Invalid email or password', 401));
     }
 
-    const token = jwt.sign(
+    const accessToken = jwt.sign(
         {
             id: driver._id,
             role: 'driver',
@@ -100,7 +100,13 @@ exports.driverLogin = catchAsync(async (req, res, next) => {
             busId: driver.Bus_id
         },
         process.env.JWT_SECRET,
-        { expiresIn: '90d' }
+        { expiresIn: '1d' }
+    );
+
+    const refreshToken = jwt.sign(
+        { id: driver._id, role: 'driver' },
+        process.env.JWT_REFRESH_SECRET,
+        { expiresIn: '7d' }
     );
 
     driver.lastLogin = new Date();
@@ -117,7 +123,9 @@ exports.driverLogin = catchAsync(async (req, res, next) => {
     res.status(200).json({
         status: 'success',
         message: 'Login successful',
-        token: token,
+        token: accessToken,
+        accessToken: accessToken,
+        refreshToken: refreshToken,
         data: {
             driver: driverResponse,
             assignedBus: busDetails
@@ -451,5 +459,48 @@ exports.updateDriverStatus = catchAsync(async (req, res, next) => {
         data: {
             status: driver.status
         }
+    });
+});
+
+exports.driverRefreshToken = catchAsync(async (req, res, next) => {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+        return next(new AppError('Refresh token is required', 400));
+    }
+
+    let decoded;
+    try {
+        decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    } catch (err) {
+        return next(new AppError('Invalid or expired refresh token', 401));
+    }
+
+    const driver = await Driver.findById(decoded.id);
+    if (!driver) {
+        return next(new AppError('Driver not found', 404));
+    }
+
+    const newAccessToken = jwt.sign(
+        {
+            id: driver._id,
+            role: 'driver',
+            instituteId: driver.Institute,
+            busId: driver.Bus_id
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '1d' }
+    );
+
+    const newRefreshToken = jwt.sign(
+        { id: driver._id, role: 'driver' },
+        process.env.JWT_REFRESH_SECRET,
+        { expiresIn: '7d' }
+    );
+
+    res.status(200).json({
+        status: 'success',
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken
     });
 }); 

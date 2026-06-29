@@ -1,4 +1,5 @@
 const Parent = require("../models/ParentModel");
+const jwt = require("jsonwebtoken");
 
 exports.createParent = async (req, res) => {
   try {
@@ -179,6 +180,127 @@ exports.deleteParent = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Parent deleted successfully",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+exports.parentLogin = async (req, res) => {
+  try {
+    const { phoneNo, password } = req.body;
+
+    if (!phoneNo || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number and password are required",
+      });
+    }
+
+    const parent = await Parent.findOne({ phoneNo });
+    if (!parent) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid phone number or password",
+      });
+    }
+
+    const isPasswordValid = await parent.comparePassword(password);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid phone number or password",
+      });
+    }
+
+    const accessToken = jwt.sign(
+      {
+        id: parent._id,
+        role: "parent",
+        instituteId: parent.instituteId,
+        busId: parent.busId,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: parent._id, role: "parent" },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    const parentResponse = parent.toObject();
+    delete parentResponse.password;
+
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+      accessToken,
+      refreshToken,
+      parent: parentResponse,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+exports.parentRefreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Refresh token is required",
+      });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    } catch (err) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired refresh token",
+      });
+    }
+
+    const parent = await Parent.findById(decoded.id);
+    if (!parent) {
+      return res.status(404).json({
+        success: false,
+        message: "Parent not found",
+      });
+    }
+
+    const newAccessToken = jwt.sign(
+      {
+        id: parent._id,
+        role: "parent",
+        instituteId: parent.instituteId,
+        busId: parent.busId,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    const newRefreshToken = jwt.sign(
+      { id: parent._id, role: "parent" },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    return res.status(200).json({
+      success: true,
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
     });
   } catch (err) {
     return res.status(500).json({
