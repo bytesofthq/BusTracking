@@ -24,3 +24,4 @@ router.patch('/:id', authorize('admin'), driverController.updateDriver);
 router.delete('/:id', authorize('admin'), driverController.deleteDriver);
 
 module.exports = router;
+

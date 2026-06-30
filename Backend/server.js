@@ -15,6 +15,11 @@ const planRoutes = require("./routes/PlanRoutes");
 const subscriptionRoutes = require("./routes/SubscriptionRoutes");
 const attendanceRoutes = require("./routes/AttendanceRoutes");
 const messageRoutes = require("./routes/messageRoutes");
+const driverRoutes = require("./routes/driverRoutes");
+const busRoutes = require("./routes/busRoutes");
+
+const loggingMiddleware = require("./middlewares/loggingMiddleware");
+const errorMiddleware = require("./middlewares/errorMiddleware");
 
 const app = express();
 const server = http.createServer(app);
@@ -50,6 +55,7 @@ const limiter = rateLimit({
   },
 });
 
+app.use(loggingMiddleware);
 app.use(cors(corsOptions));
 app.use(limiter);
 app.use(express.json());
@@ -69,6 +75,8 @@ app.use("/api/plan", planRoutes);
 app.use("/api/subscription", subscriptionRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/message", messageRoutes);
+app.use("/api/driver", driverRoutes);
+app.use("/api/bus", busRoutes);
 
 
 
@@ -102,6 +110,9 @@ io.on('connection', (socket) => {
     console.log('User disconnected:', socket.id);
   });
 });
+
+// Global error handling middleware (must be registered last)
+app.use(errorMiddleware);
 
 server.listen(PORT, () => {
   console.log(`Server started on port ${PORT}`);

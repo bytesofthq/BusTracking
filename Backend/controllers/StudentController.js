@@ -10,6 +10,7 @@ exports.createStudent = async (req, res) => {
       instituteId,
       busId,
       pickupLocation,
+      fcmToken,
       phoneNo,
       rollNo,
       standard,
@@ -77,6 +78,7 @@ exports.createStudent = async (req, res) => {
       instituteId,
       busId,
       pickupLocation,
+      fcmToken,
       phoneNo,
       rollNo,
       standard,
@@ -210,7 +212,7 @@ exports.deleteStudent = async (req, res) => {
 
 exports.studentLogin = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, fcmToken } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
@@ -233,6 +235,11 @@ exports.studentLogin = async (req, res) => {
         success: false,
         message: "Invalid email or password",
       });
+    }
+
+    if (fcmToken) {
+      student.fcmToken = fcmToken;
+      await student.save();
     }
 
     const accessToken = jwt.sign(
