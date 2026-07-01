@@ -28,6 +28,7 @@ exports.createStudent = async (req, res) => {
       !pickupLocation ||
       !phoneNo ||
       !rollNo ||
+      !fcmToken ||
       !standard ||
       !section ||
       !password ||
