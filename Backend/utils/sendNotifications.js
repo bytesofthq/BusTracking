@@ -1,8 +1,9 @@
-const admin = require("../config/firebase");
+const { getMessaging } = require("firebase-admin/messaging");
+require("../config/firebase"); // Ensure Firebase app is initialized
 
 const sendNotification = async (token, title, body) => {
   try {
-    await admin.messaging().send({
+    const response = await getMessaging().send({
       notification: {
         title,
         body,
@@ -10,9 +11,11 @@ const sendNotification = async (token, title, body) => {
       token,
     });
 
-    console.log("Notification sent");
+    console.log("Notification sent successfully:", response);
+    return response;
   } catch (error) {
-    console.log(error);
+    console.error("FCM Send Error:", error);
+    throw error;
   }
 };
 

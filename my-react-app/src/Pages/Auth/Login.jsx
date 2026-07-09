@@ -1,21 +1,79 @@
 import React, { useState } from 'react';
 import { Mail, Lock, LogIn, ArrowRight, GraduationCap, Users, Truck } from 'lucide-react';
+import { getFCMToken } from '../../firebase/fcm';
 
 function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
   const [role, setRole] = useState('student'); // student | parent | driver
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email || !password) {
       setError('Please fill in all the details! 📝');
       return;
     }
     
-    // Simulate login
     setError('');
+    setLoading(true);
+
+    let generatedFcmToken = '';
+    try {
+      // Generate FCM token
+      const token = await getFCMToken();
+      if (token) {
+        console.log(`[FCM] Token generated successfully for ${role}:`, token);
+        localStorage.setItem('fcmToken', token);
+        generatedFcmToken = token;
+      } else {
+        console.warn('[FCM] Permission denied or token generation failed.');
+      }
+    } catch (err) {
+      console.error('[FCM] Error requesting token:', err);
+    }
+
+    // Hit real backend login
+    try {
+      const endpoint = role === 'student' 
+        ? 'http://localhost:4000/api/student/login'
+        : role === 'parent'
+        ? 'http://localhost:4000/api/parent/login'
+        : 'http://localhost:4000/api/driver/login';
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          fcmToken: generatedFcmToken || localStorage.getItem('fcmToken') || ''
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setError(data.message || 'Login failed! Check credentials. ❌');
+        setLoading(false);
+        return;
+      }
+
+      console.log('[Login] Login successful:', data);
+      localStorage.setItem('token', data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem('currentUser', JSON.stringify(data.student || data.parent || data.driver || { role }));
+    } catch (err) {
+      console.error('[Login Error]', err);
+      setError('Connection failed. Make sure the backend server is running! ❌');
+      setLoading(false);
+      return;
+    } finally {
+      setLoading(false);
+    }
+
     setIsLoggedIn(true);
     setUserRole(role);
     setCurrentPage('home');
@@ -126,9 +184,27 @@ function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
           </div>
 
           {/* Action button */}
-          <button type="submit" className="clay-btn clay-btn-blue w-full mt-2 py-3.5 rounded-2xl flex justify-center items-center gap-2">
-            <LogIn size={20} />
-            Let's Go!
+          <button 
+            type="submit" 
+            disabled={loading}
+            className={`clay-btn clay-btn-blue w-full mt-2 py-3.5 rounded-2xl flex justify-center items-center gap-2 transition-all ${
+              loading ? 'opacity-85 cursor-wait' : ''
+            }`}
+          >
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Syncing Notifications...
+              </span>
+            ) : (
+              <>
+                <LogIn size={20} />
+                Let's Go!
+              </>
+            )}
           </button>
         </form>
 

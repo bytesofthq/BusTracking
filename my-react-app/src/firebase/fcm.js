@@ -1,4 +1,4 @@
-import { getToken } from "firebase/messaging";
+import { getToken, onMessage } from "firebase/messaging";
 import { messaging } from "./firebase";
 
 export const getFCMToken = async () => {
@@ -21,3 +21,16 @@ export const getFCMToken = async () => {
     return null;
   }
 };
+
+// Listen for messages while the app is in the foreground
+if (typeof window !== "undefined") {
+  onMessage(messaging, (payload) => {
+    console.log("Foreground message received:", payload);
+    if (Notification.permission === "granted") {
+      new Notification(payload.notification?.title || "TrackMyBus Notification", {
+        body: payload.notification?.body || "You have a new update!",
+        icon: "/favicon.svg",
+      });
+    }
+  });
+}

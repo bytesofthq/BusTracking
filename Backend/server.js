@@ -17,6 +17,7 @@ const attendanceRoutes = require("./routes/AttendanceRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const driverRoutes = require("./routes/driverRoutes");
 const busRoutes = require("./routes/busRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 const loggingMiddleware = require("./middlewares/loggingMiddleware");
 const errorMiddleware = require("./middlewares/errorMiddleware");
@@ -77,6 +78,7 @@ app.use("/api/attendance", attendanceRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/driver", driverRoutes);
 app.use("/api/bus", busRoutes);
+app.use("/api/notification", notificationRoutes);
 
 
 
