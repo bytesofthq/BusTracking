@@ -7,13 +7,14 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const parentSchema = mongoose.Schema({
-    parentName:{
-type:String,
-required:true,
+parentName:{
+    type:String,
+     required:true,
     },
-    childsName:{
-type:String,
-required:true,
+
+   childsName:{
+   type:String,
+   required:true,
     },
 
     instituteId:{
