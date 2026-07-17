@@ -3,7 +3,8 @@ const mongoose = require('mongoose');
 const attendanceSchema = mongoose.Schema({
     studentId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Student"
+        ref: "Student",
+        required: true
     },
     parentId:{
         type: mongoose.Schema.Types.ObjectId,
@@ -11,16 +12,18 @@ const attendanceSchema = mongoose.Schema({
     },
     instituteId:{
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Institute"
+        ref: "Institute",
+        required: true
     },
     busId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Bus"
+        ref: "Bus",
+        required: true
     },
     attendance: {
         type: String,
-        enum: ["present", "absent","not-marked"],
-        default:"not-marked"
+        enum: ["present", "absent", "not-marked"],
+        default: "not-marked"
     },
     time: {
         type: Date,
@@ -31,8 +34,25 @@ const attendanceSchema = mongoose.Schema({
             lat: Number,
             lng: Number
         },
-        required: true
+        required: false
+    },
+    isPreMarked: {
+        type: Boolean,
+        default: false
+    },
+    reason: {
+        type: String,
+        default: ""
     }
-})
+}, {
+    timestamps: true
+});
+
+// Unique index to prevent duplicate planner entries for the same student on the same day
+attendanceSchema.index({ studentId: 1, time: 1, isPreMarked: 1 }, { unique: true });
+
+// Query indexes for drivers and institutes
+attendanceSchema.index({ busId: 1, time: 1, attendance: 1 });
+attendanceSchema.index({ instituteId: 1, time: 1, attendance: 1 });
 
 module.exports = mongoose.model("Attendance", attendanceSchema);
