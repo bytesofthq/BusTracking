@@ -1,104 +1,87 @@
-const Student = require("../models/StudentModel");
-const OTP = require("../models/OtpModel");
+const Parent = require("../models/ParentModel");
 const jwt = require("jsonwebtoken");
 
-exports.createStudent = async (req, res) => {
+exports.createParent = async (req, res) => {
   try {
     const {
-      name,
-      email,
+      parentName,
+      childsName,
       instituteId,
       busId,
       pickupLocation,
       fcmToken,
       phoneNo,
-      rollNo,
-      standard,
-      section,
+      ChildsRollNo,
+      ChildsClass,
+      ChildsSection,
       password,
-      otp,
     } = req.body;
 
     // Validate required fields
     if (
-      !name ||
-      !email ||
+      !parentName ||
+      !childsName ||
       !instituteId ||
       !busId ||
       !pickupLocation ||
-      !phoneNo ||
-      !rollNo ||
       !fcmToken ||
-      !standard ||
-      !section ||
-      !password ||
-      !otp
+      !phoneNo ||
+      !ChildsRollNo ||
+      !ChildsClass ||
+      !ChildsSection ||
+      !password
     ) {
       return res.status(400).json({
         success: false,
-        message: "All fields, including OTP and FCM Token, are required",
+        message: "All fields are required",
       });
     }
 
-    // Check if Student is already registered
-    const studentExist = await Student.findOne({ email });
-    if (studentExist) {
+    // Validate pickupLocation structure
+    if (
+      typeof pickupLocation !== "object" ||
+      pickupLocation.lat === undefined ||
+      pickupLocation.lng === undefined
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "pickupLocation must be an object with lat and lng",
+      });
+    }
+
+    // Check if Parent is already registered
+    const parentExist = await Parent.findOne({ phoneNo });
+    if (parentExist) {
       return res.status(409).json({
         success: false,
-        message: "Student is already registered",
+        message: "Parent is already registered with this phone number",
       });
     }
 
-    // Verify OTP
-    const otpRecord = await OTP.findOne({ email }).sort({ expiresAt: -1 });
-    if (!otpRecord) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP not found or expired",
-      });
-    }
-
-    if (otpRecord.otp !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP",
-      });
-    }
-
-    if (otpRecord.expiresAt < new Date()) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP has expired",
-      });
-    }
-
-    // Save Student (Mongoose hook pre-save handles password hashing)
-    const newStudent = new Student({
-      name,
-      email,
+    // Save Parent (Mongoose pre-save hook handles hashing the password)
+    const newParent = new Parent({
+      parentName,
+      childsName,
       instituteId,
       busId,
       pickupLocation,
       fcmToken,
       phoneNo,
-      rollNo,
-      standard,
-      section,
+      ChildsRollNo,
+      ChildsClass,
+      ChildsSection,
       password,
     });
 
-    await newStudent.save();
-
-    // Clean up OTP to prevent re-use
-    await OTP.deleteMany({ email });
+    await newParent.save();
 
     return res.status(201).json({
       success: true,
-      message: "Student registered successfully",
+      message: "Parent registered successfully",
       data: {
-        id: newStudent._id,
-        name: newStudent.name,
-        email: newStudent.email,
+        id: newParent._id,
+        parentName: newParent.parentName,
+        phoneNo: newParent.phoneNo,
       },
     });
   } catch (err) {
@@ -109,18 +92,16 @@ exports.createStudent = async (req, res) => {
   }
 };
 
-exports.getStudentsByInstitute = async (req, res) => {
+exports.getParentsByInstitute = async (req, res) => {
   try {
     const { instituteId } = req.params;
 
-    const students = await Student.find({
-      instituteId: instituteId,
-    }).select("-password");
+    const parents = await Parent.find({ instituteId }).select("-password");
 
     return res.status(200).json({
       success: true,
-      count: students.length,
-      students,
+      count: parents.length,
+      parents,
     });
   } catch (err) {
     return res.status(500).json({
@@ -130,35 +111,32 @@ exports.getStudentsByInstitute = async (req, res) => {
   }
 };
 
-exports.getStudentByStandard = async (req, res) => {
+exports.getParentsByBus = async (req, res) => {
   try {
-    const { standard } = req.params;
-    const students = await Student.find({
-      standard: standard,
-    }).select("-password");
+    const { busId } = req.params;
+
+    const parents = await Parent.find({ busId }).select("-password");
 
     return res.status(200).json({
       success: true,
-      count: students.length,
-      students,
+      count: parents.length,
+      parents,
     });
-
-  }
-  catch (err) {
+  } catch (err) {
     return res.status(500).json({
       success: false,
       message: err.message,
     });
   }
-}
+};
 
-exports.updateStudent = async (req, res) => {
+exports.updateParent = async (req, res) => {
   try {
-    const { studentId } = req.params;
+    const { parentId } = req.params;
     const updatedInfo = req.body;
 
-    const student = await Student.findByIdAndUpdate(
-      studentId,
+    const parent = await Parent.findByIdAndUpdate(
+      parentId,
       updatedInfo,
       {
         new: true,
@@ -166,17 +144,17 @@ exports.updateStudent = async (req, res) => {
       }
     );
 
-    if (!student) {
+    if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Student not found",
+        message: "Parent not found",
       });
     }
 
     return res.status(200).json({
       success: true,
       message: "Info Updated!",
-      student,
+      parent,
     });
   } catch (err) {
     return res.status(500).json({
@@ -186,22 +164,22 @@ exports.updateStudent = async (req, res) => {
   }
 };
 
-exports.deleteStudent = async (req, res) => {
+exports.deleteParent = async (req, res) => {
   try {
-    const { studentId } = req.params;
+    const { parentId } = req.params;
 
-    const student = await Student.findByIdAndDelete(studentId);
+    const parent = await Parent.findByIdAndDelete(parentId);
 
-    if (!student) {
+    if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Student not found",
+        message: "Parent not found",
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: "Student deleted successfully",
+      message: "Parent deleted successfully",
     });
   } catch (err) {
     return res.status(500).json({
@@ -211,64 +189,59 @@ exports.deleteStudent = async (req, res) => {
   }
 };
 
-exports.studentLogin = async (req, res) => {
+exports.parentLogin = async (req, res) => {
   try {
-    const { email, password, fcmToken } = req.body;
+    const { phoneNo, password } = req.body;
 
-    if (!email || !password) {
+    if (!phoneNo || !password) {
       return res.status(400).json({
         success: false,
-        message: "Email and password are required",
+        message: "Phone number and password are required",
       });
     }
 
-    const student = await Student.findOne({ email: email.toLowerCase() });
-    if (!student) {
+    const parent = await Parent.findOne({ phoneNo });
+    if (!parent) {
       return res.status(401).json({
         success: false,
-        message: "Invalid email or password",
+        message: "Invalid phone number or password",
       });
     }
 
-    const isPasswordValid = await student.comparePassword(password);
+    const isPasswordValid = await parent.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        message: "Invalid email or password",
+        message: "Invalid phone number or password",
       });
-    }
-
-    if (fcmToken) {
-      student.fcmToken = fcmToken;
-      await student.save();
     }
 
     const accessToken = jwt.sign(
       {
-        id: student._id,
-        role: "student",
-        instituteId: student.instituteId,
-        busId: student.busId,
+        id: parent._id,
+        role: "parent",
+        instituteId: parent.instituteId,
+        busId: parent.busId,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
 
     const refreshToken = jwt.sign(
-      { id: student._id, role: "student" },
+      { id: parent._id, role: "parent" },
       process.env.JWT_REFRESH_SECRET,
       { expiresIn: "7d" }
     );
 
-    const studentResponse = student.toObject();
-    delete studentResponse.password;
+    const parentResponse = parent.toObject();
+    delete parentResponse.password;
 
     return res.status(200).json({
       success: true,
       message: "Login successful",
       accessToken,
       refreshToken,
-      student: studentResponse,
+      parent: parentResponse,
     });
   } catch (err) {
     return res.status(500).json({
@@ -278,7 +251,7 @@ exports.studentLogin = async (req, res) => {
   }
 };
 
-exports.studentRefreshToken = async (req, res) => {
+exports.parentRefreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
 
@@ -299,27 +272,27 @@ exports.studentRefreshToken = async (req, res) => {
       });
     }
 
-    const student = await Student.findById(decoded.id);
-    if (!student) {
+    const parent = await Parent.findById(decoded.id);
+    if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Student not found",
+        message: "Parent not found",
       });
     }
 
     const newAccessToken = jwt.sign(
       {
-        id: student._id,
-        role: "student",
-        instituteId: student.instituteId,
-        busId: student.busId,
+        id: parent._id,
+        role: "parent",
+        instituteId: parent.instituteId,
+        busId: parent.busId,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
 
     const newRefreshToken = jwt.sign(
-      { id: student._id, role: "student" },
+      { id: parent._id, role: "parent" },
       process.env.JWT_REFRESH_SECRET,
       { expiresIn: "7d" }
     );
