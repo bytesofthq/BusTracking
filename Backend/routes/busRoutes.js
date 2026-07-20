@@ -21,5 +21,6 @@ router.get('/nearby', authorize('admin', 'parent', 'driver'), busController.getB
 // Routes with ID parameter
 router.get('/:id', authorize('admin', 'parent', 'driver'), busController.getBus);
 router.get('/:id/with-driver', authorize('admin', 'parent'), busController.getBusWithDriver);
+router.get('/:id/optimal-route', authorize('admin', 'driver'), busController.getOptimalDailyRoute);
 
 module.exports = router;

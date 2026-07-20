@@ -553,3 +553,108 @@ exports.getBusStatistics = catchAsync(async (req, res, next) => {
         }
     });
 });
+
+exports.getOptimalDailyRoute = catchAsync(async (req, res, next) => {
+    const { instituteId } = req.user;
+    const { id } = req.params; // busId
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        return next(new AppError('Invalid bus ID format', 400));
+    }
+
+    const bus = await Bus.findOne({ _id: id, instituteId: instituteId }).lean();
+    if (!bus) {
+        return next(new AppError('Bus not found', 404));
+    }
+
+    const Student = require('../models/StudentModel');
+    const Attendance = require('../models/AttendanceModel');
+
+    const students = await Student.find({ busId: id }).lean();
+    
+    // Get today's UTC date for attendance
+    const today = new Date();
+    const utcDate = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+
+    // Get today's attendance for this bus
+    const attendanceRecords = await Attendance.find({
+        busId: id,
+        time: utcDate,
+        isPreMarked: true
+    }).lean();
+
+    const attendanceMap = {};
+    attendanceRecords.forEach(record => {
+        attendanceMap[record.studentId.toString()] = record.attendance; // "absent", "present", or "not-marked"
+    });
+
+    // Determine which pickup points to keep
+    const validPickupPoints = [];
+    for (const point of bus.pickupPoints) {
+        // Find students assigned to this exact pickup point coordinates
+        const assignedStudents = students.filter(s => 
+            s.pickupLocation && 
+            Math.abs(s.pickupLocation.lat - point.lat) < 0.0001 && 
+            Math.abs(s.pickupLocation.lng - point.lng) < 0.0001
+        );
+
+        if (assignedStudents.length === 0) {
+            // Keep if no student explicitly assigned to this coordinate (maybe generic stop)
+            validPickupPoints.push(point);
+            continue;
+        }
+
+        let allAbsent = true;
+        for (const student of assignedStudents) {
+            const status = attendanceMap[student._id.toString()];
+            if (status !== 'absent') {
+                allAbsent = false;
+                break;
+            }
+        }
+
+        if (!allAbsent) {
+            validPickupPoints.push(point);
+        }
+    }
+
+    // Nearest Neighbor TSP heuristic
+    const route = [];
+    route.push(bus.startLocation);
+
+    let currentLocation = bus.startLocation;
+    let unvisited = [...validPickupPoints];
+
+    while (unvisited.length > 0) {
+        let nearestIdx = 0;
+        let minDistance = Infinity;
+
+        for (let i = 0; i < unvisited.length; i++) {
+            const dist = Math.sqrt(
+                Math.pow(currentLocation.lat - unvisited[i].lat, 2) +
+                Math.pow(currentLocation.lng - unvisited[i].lng, 2)
+            );
+            if (dist < minDistance) {
+                minDistance = dist;
+                nearestIdx = i;
+            }
+        }
+
+        currentLocation = unvisited[nearestIdx];
+        route.push(currentLocation);
+        unvisited.splice(nearestIdx, 1);
+    }
+
+    route.push(bus.endLocation);
+
+    res.status(200).json({
+        status: 'success',
+        data: {
+            busId: bus._id,
+            date: utcDate.toISOString().split('T')[0],
+            originalStopCount: bus.pickupPoints.length,
+            optimizedStopCount: validPickupPoints.length,
+            route: route
+        }
+    });
+});

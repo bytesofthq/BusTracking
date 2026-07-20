@@ -255,6 +255,8 @@ exports.getPlannerMonth = async (req, res) => {
           });
         }
         studentId = student._id;
+      } else if (req.user && req.user.role === "student") {
+        studentId = req.user.id;
       } else {
         return res.status(400).json({
           success: false,
@@ -332,6 +334,9 @@ exports.updatePlannerAttendance = async (req, res) => {
           });
         }
         studentId = student._id;
+      } else if (req.user && req.user.role === "student") {
+        studentId = req.user.id;
+        student = await Student.findById(studentId);
       } else {
         return res.status(400).json({
           success: false,
