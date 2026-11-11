@@ -6,12 +6,21 @@ const {
   getInstituteById,
   updateInstitute,
   deleteInstitute,
+  getPublicInstitutes,
+  instituteLogin,
+  instituteRefreshToken
 } = require("../controllers/InstituteController");
+const { protect, authorize } = require("../middlewares/auth");
 
 router.post("/register", createInstitute);
-router.get("/", getAllInstitutes);
-router.get("/:instituteId", getInstituteById);
-router.put("/:instituteId", updateInstitute);
-router.delete("/:instituteId", deleteInstitute);
+router.post("/login", instituteLogin);
+router.post("/refresh-token", instituteRefreshToken);
+router.get("/public", getPublicInstitutes);
+
+// Protected routes
+router.get("/", protect, authorize("admin"), getAllInstitutes);
+router.get("/:instituteId", protect, getInstituteById);
+router.put("/:instituteId", protect, authorize("admin"), updateInstitute);
+router.delete("/:instituteId", protect, authorize("admin"), deleteInstitute);
 
 module.exports = router;

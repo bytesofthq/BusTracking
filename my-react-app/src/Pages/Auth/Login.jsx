@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
-import { Mail, Lock, LogIn, ArrowRight, GraduationCap, Users, Truck } from 'lucide-react';
+import { Mail, Lock, LogIn, ArrowRight, GraduationCap, Users, Truck, ShieldCheck, Building2 } from 'lucide-react';
 import { getFCMToken } from '../../firebase/fcm';
+import { useNavigate } from 'react-router-dom';
 
-function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
-  const [role, setRole] = useState('student'); // student | parent | driver
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+
+function Login({ setIsLoggedIn, setUserRole }) {
+  const navigate = useNavigate();
+  const [role, setRole] = useState('student'); // student | parent | driver | admin
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -27,20 +31,20 @@ function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
         console.log(`[FCM] Token generated successfully for ${role}:`, token);
         localStorage.setItem('fcmToken', token);
         generatedFcmToken = token;
-      } else {
-        console.warn('[FCM] Permission denied or token generation failed.');
       }
     } catch (err) {
-      console.error('[FCM] Error requesting token:', err);
+      console.warn('[FCM] Token generation skipped:', err);
     }
 
     // Hit real backend login
     try {
       const endpoint = role === 'student' 
-        ? 'http://localhost:4000/api/student/login'
+        ? `${API_BASE}/api/student/login`
         : role === 'parent'
-        ? 'http://localhost:4000/api/parent/login'
-        : 'http://localhost:4000/api/driver/login';
+        ? `${API_BASE}/api/parent/login`
+        : role === 'driver'
+        ? `${API_BASE}/api/driver/login`
+        : `${API_BASE}/api/institute/login`;
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -49,6 +53,7 @@ function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
         },
         body: JSON.stringify({
           email,
+          phoneNo: email, // in case parent logs in with phone number
           password,
           fcmToken: generatedFcmToken || localStorage.getItem('fcmToken') || ''
         })
@@ -62,9 +67,23 @@ function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
       }
 
       console.log('[Login] Login successful:', data);
-      localStorage.setItem('token', data.accessToken);
+      localStorage.setItem('token', data.accessToken || data.token);
       localStorage.setItem('refreshToken', data.refreshToken);
-      localStorage.setItem('currentUser', JSON.stringify(data.student || data.parent || data.driver || { role }));
+      
+      const userPayload = data.student || data.parent || data.driver || data.institute || { role };
+      userPayload.role = role === 'admin' ? 'admin' : role;
+      localStorage.setItem('currentUser', JSON.stringify(userPayload));
+
+      setIsLoggedIn(true);
+      setUserRole(userPayload.role);
+
+      if (userPayload.role === 'driver') {
+        navigate('/driver');
+      } else if (userPayload.role === 'admin') {
+        navigate('/admin');
+      } else {
+        navigate('/');
+      }
     } catch (err) {
       console.error('[Login Error]', err);
       setError('Connection failed. Make sure the backend server is running! ❌');
@@ -73,34 +92,33 @@ function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
     } finally {
       setLoading(false);
     }
-
-    setIsLoggedIn(true);
-    setUserRole(role);
-    setCurrentPage('home');
   };
 
   return (
     <div className="flex justify-center items-center py-12 px-6 flex-grow min-h-[65vh]">
-      <div className="clay-card w-full max-w-[460px] bg-white text-center anim-float">
+      <div className="clay-card w-full max-w-[480px] bg-white text-center anim-float">
         {/* Playful Header */}
         <div className="flex flex-col items-center gap-2 mb-8">
           <div className={`flex items-center justify-center w-20 h-20 rounded-full border-4 border-white/40 shadow-[inset_-6px_-6px_12px_rgba(0,0,0,0.15),inset_6px_6px_12px_rgba(255,255,255,0.4),0_8px_20px_rgba(0,0,0,0.15)] mb-4 transition-all duration-300 ${
-            role === 'student' ? 'bg-clay-blue shadow-clay-blue/30' : role === 'parent' ? 'bg-clay-green shadow-clay-green/30' : 'bg-clay-yellow shadow-clay-yellow/30'
+            role === 'student' ? 'bg-clay-blue shadow-clay-blue/30' : role === 'parent' ? 'bg-clay-green shadow-clay-green/30' : role === 'driver' ? 'bg-clay-yellow shadow-clay-yellow/30' : 'bg-clay-orange shadow-clay-orange/30'
           }`}>
             {role === 'student' && <GraduationCap size={36} color="#ffffff" />}
             {role === 'parent' && <Users size={36} color="#ffffff" />}
             {role === 'driver' && <Truck size={36} color="#ffffff" />}
+            {role === 'admin' && <Building2 size={36} color="#ffffff" />}
           </div>
           <h2 className="text-3xl font-friendly text-clay-text-dark font-semibold">Welcome Back!</h2>
-          <p className="text-[0.95rem] text-clay-text-muted max-w-[300px]">Let's get logged in so you can track your ride!</p>
+          <p className="text-[0.95rem] text-clay-text-muted max-w-[320px]">
+            {role === 'admin' ? 'School Fleet Administration Portal' : 'Log in to track and manage school rides!'}
+          </p>
         </div>
 
         {/* Role Selector Tabs */}
-        <div className="flex gap-1.5 bg-clay-bg p-1.5 rounded-[18px] shadow-[inset_2px_2px_5px_rgba(166,180,200,0.15),inset_-2px_-2px_5px_rgba(255,255,255,0.7)] mb-8">
+        <div className="grid grid-cols-4 gap-1 bg-clay-bg p-1.5 rounded-[18px] shadow-[inset_2px_2px_5px_rgba(166,180,200,0.15),inset_-2px_-2px_5px_rgba(255,255,255,0.7)] mb-8">
           <button
             type="button"
             onClick={() => setRole('student')}
-            className={`flex-1 border-none bg-transparent py-2.5 px-1.5 rounded-xl font-friendly font-semibold text-[0.85rem] cursor-pointer transition-all duration-200 ${
+            className={`border-none bg-transparent py-2 px-1 rounded-xl font-friendly font-semibold text-[0.8rem] cursor-pointer transition-all duration-200 ${
               role === 'student' 
                 ? 'bg-clay-blue text-white shadow-[3px_3px_6px_rgba(91,150,245,0.3),inset_-3px_-3px_6px_rgba(0,0,0,0.1),inset_3px_3px_6px_rgba(255,255,255,0.4)]' 
                 : 'text-clay-text-muted hover:text-clay-blue'
@@ -111,7 +129,7 @@ function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
           <button
             type="button"
             onClick={() => setRole('parent')}
-            className={`flex-1 border-none bg-transparent py-2.5 px-1.5 rounded-xl font-friendly font-semibold text-[0.85rem] cursor-pointer transition-all duration-200 ${
+            className={`border-none bg-transparent py-2 px-1 rounded-xl font-friendly font-semibold text-[0.8rem] cursor-pointer transition-all duration-200 ${
               role === 'parent' 
                 ? 'bg-clay-green text-white shadow-[3px_3px_6px_rgba(92,192,117,0.3),inset_-3px_-3px_6px_rgba(0,0,0,0.1),inset_3px_3px_6px_rgba(255,255,255,0.4)]' 
                 : 'text-clay-text-muted hover:text-clay-green'
@@ -122,13 +140,24 @@ function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
           <button
             type="button"
             onClick={() => setRole('driver')}
-            className={`flex-1 border-none bg-transparent py-2.5 px-1.5 rounded-xl font-friendly font-semibold text-[0.85rem] cursor-pointer transition-all duration-200 ${
+            className={`border-none bg-transparent py-2 px-1 rounded-xl font-friendly font-semibold text-[0.8rem] cursor-pointer transition-all duration-200 ${
               role === 'driver' 
                 ? 'bg-clay-yellow text-clay-text-dark shadow-[3px_3px_6px_rgba(248,200,71,0.3),inset_-3px_-3px_6px_rgba(0,0,0,0.1),inset_3px_3px_6px_rgba(255,255,255,0.4)]' 
                 : 'text-clay-text-muted hover:text-clay-yellow'
             }`}
           >
             🚌 Driver
+          </button>
+          <button
+            type="button"
+            onClick={() => setRole('admin')}
+            className={`border-none bg-transparent py-2 px-1 rounded-xl font-friendly font-semibold text-[0.8rem] cursor-pointer transition-all duration-200 ${
+              role === 'admin' 
+                ? 'bg-clay-orange text-white shadow-[3px_3px_6px_rgba(247,139,83,0.3),inset_-3px_-3px_6px_rgba(0,0,0,0.1),inset_3px_3px_6px_rgba(255,255,255,0.4)]' 
+                : 'text-clay-text-muted hover:text-clay-orange'
+            }`}
+          >
+            🏫 Admin
           </button>
         </div>
 
@@ -139,13 +168,13 @@ function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
           {/* Email / ID Input */}
           <div className="flex flex-col">
             <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">
-              {role === 'student' ? 'Student Email or ID' : role === 'parent' ? 'Parent Email' : 'Driver Registration ID'}
+              {role === 'student' ? 'Student Email or ID' : role === 'parent' ? 'Parent Email' : 'Driver Email'}
             </label>
             <div className="relative flex items-center">
               <Mail size={18} className="text-slate-400 absolute left-4 z-10" />
               <input
                 type="text"
-                placeholder={role === 'student' ? 'student@school.edu' : role === 'parent' ? 'parent@home.com' : 'driver-9922'}
+                placeholder={role === 'student' ? 'student@school.edu' : role === 'parent' ? 'parent@home.com' : 'driver@school.edu'}
                 className="clay-input pl-11"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -213,7 +242,7 @@ function Login({ setCurrentPage, setIsLoggedIn, setUserRole }) {
           <span className="text-clay-text-muted font-clean">New to TrackMyBus? </span>
           <button 
             className="border-none bg-transparent text-clay-blue text-[0.9rem] font-bold cursor-pointer font-friendly hover:underline" 
-            onClick={() => setCurrentPage('register')}
+            onClick={() => navigate('/register')}
           >
             Create an account <ArrowRight size={14} className="ml-1 inline-block" />
           </button>

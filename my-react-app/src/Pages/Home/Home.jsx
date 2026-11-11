@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Bus, MapPin, Navigation, Bell, Share2, Compass, Play, RotateCcw } from 'lucide-react';
 import { getFCMToken } from "../../firebase/fcm";
+import { useNavigate } from 'react-router-dom';
 
-function Home({ setCurrentPage, isLoggedIn, userRole }) {
+function Home({ isLoggedIn, userRole }) {
+  const navigate = useNavigate();
   // Bus simulation state
   const [busPosition, setBusPosition] = useState(0);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -59,11 +61,11 @@ function Home({ setCurrentPage, isLoggedIn, userRole }) {
           </p>
           <div className="flex gap-3 mt-4">
             <button 
-              className="clay-btn clay-btn-blue py-3 px-6 rounded-2xl flex items-center gap-2" 
-              onClick={() => setCurrentPage(isLoggedIn ? 'home' : 'login')}
+              className="clay-btn clay-btn-blue py-3 px-6 rounded-2xl flex items-center gap-2 cursor-pointer" 
+              onClick={() => navigate('/tracking')}
             >
               <Navigation size={18} />
-              {isLoggedIn ? 'Go to Tracking' : 'Start Tracking Now'}
+              Live Map Tracking Dashboard
             </button>
             <a 
               href="#simulation" 

@@ -191,20 +191,28 @@ exports.deleteParent = async (req, res) => {
 
 exports.parentLogin = async (req, res) => {
   try {
-    const { phoneNo, password } = req.body;
+    const { phoneNo, email, password, fcmToken } = req.body;
+    const identifier = (phoneNo || email || '').trim();
 
-    if (!phoneNo || !password) {
+    if (!identifier || !password) {
       return res.status(400).json({
         success: false,
-        message: "Phone number and password are required",
+        message: "Email or phone number and password are required",
       });
     }
 
-    const parent = await Parent.findOne({ phoneNo });
+    const parent = await Parent.findOne({
+      $or: [
+        { phoneNo: identifier },
+        { phoneNo: identifier.replace(/[^0-9]/g, '') },
+        { parentName: new RegExp(`^${identifier}$`, 'i') }
+      ]
+    });
+
     if (!parent) {
       return res.status(401).json({
         success: false,
-        message: "Invalid phone number or password",
+        message: "Invalid credentials. Please verify your phone number or email.",
       });
     }
 
@@ -212,8 +220,13 @@ exports.parentLogin = async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        message: "Invalid phone number or password",
+        message: "Invalid credentials",
       });
+    }
+
+    if (fcmToken) {
+      parent.fcmToken = fcmToken;
+      await parent.save();
     }
 
     const accessToken = jwt.sign(
@@ -239,15 +252,56 @@ exports.parentLogin = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Login successful",
+      token: accessToken,
       accessToken,
       refreshToken,
-      parent: parentResponse,
+      parent: {
+        ...parentResponse,
+        role: "parent"
+      },
     });
   } catch (err) {
     return res.status(500).json({
       success: false,
       message: err.message,
     });
+  }
+};
+
+exports.getParentDashboard = async (req, res) => {
+  try {
+    const parentId = req.user.id;
+    const parent = await Parent.findById(parentId).populate('busId').lean();
+    if (!parent) {
+      return res.status(404).json({ success: false, message: 'Parent not found' });
+    }
+
+    const student = await Student.findOne({
+      rollNo: parent.ChildsRollNo,
+      standard: parent.ChildsClass,
+      section: parent.ChildsSection,
+      instituteId: parent.instituteId
+    }).lean();
+
+    let activeTrip = null;
+    const busRefId = parent.busId ? (parent.busId._id || parent.busId) : null;
+    if (busRefId) {
+      const Trip = require('../models/Trip');
+      activeTrip = await Trip.findOne({
+        busId: busRefId,
+        status: 'ongoing'
+      }).populate('driverId', 'name phoneNo email').lean();
+    }
+
+    return res.status(200).json({
+      success: true,
+      parent: { ...parent, role: 'parent' },
+      student: student || null,
+      bus: parent.busId || null,
+      activeTrip: activeTrip || null
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 

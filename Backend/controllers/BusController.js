@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const Bus = require('../models/Bus');
 const Driver = require('../models/Driver');
+const Student = require('../models/StudentModel');
+const Attendance = require('../models/AttendanceModel');
 
 const catchAsync = (fn) => {
     return (req, res, next) => {
@@ -553,3 +555,300 @@ exports.getBusStatistics = catchAsync(async (req, res, next) => {
         }
     });
 });
+
+exports.getPublicBusesByInstitute = catchAsync(async (req, res, next) => {
+    const { instituteId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(instituteId)) {
+        return next(new AppError('Invalid institute ID', 400));
+    }
+    const buses = await Bus.find({ instituteId })
+        .select('_id busId busNo startLocation endLocation pickupPoints capacity')
+        .lean();
+    res.status(200).json({
+        status: 'success',
+        results: buses.length,
+        buses: buses
+    });
+});
+
+exports.getBusLiveLocation = catchAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const cleanId = String(id).replace(/^bus-/, '');
+    
+    // Check in-memory real-time cache
+    if (req.latestBusLocations && req.latestBusLocations[cleanId]) {
+        return res.status(200).json({
+            status: 'success',
+            live: true,
+            data: req.latestBusLocations[cleanId]
+        });
+    }
+
+    // Check bus in DB
+    let query = mongoose.Types.ObjectId.isValid(cleanId) ? { _id: cleanId } : { busId: cleanId };
+    const bus = await Bus.findOne(query).populate('driver').lean();
+    if (!bus) {
+        return next(new AppError('Bus not found', 404));
+    }
+
+    // Fallback to driver's last known location or startLocation
+    let locationData = {
+        busId: bus._id.toString(),
+        name: bus.busNo,
+        lat: bus.startLocation?.lat || 0,
+        lng: bus.startLocation?.lng || 0,
+        speed: 0,
+        heading: 0,
+        status: 'stationary',
+        timestamp: new Date().toISOString()
+    };
+
+    if (bus.driver && bus.driver.currentLocation && bus.driver.currentLocation.coordinates) {
+        locationData.lng = bus.driver.currentLocation.coordinates[0];
+        locationData.lat = bus.driver.currentLocation.coordinates[1];
+        locationData.speed = bus.driver.currentLocation.speed || 0;
+        locationData.heading = bus.driver.currentLocation.heading || 0;
+        locationData.status = 'active';
+        locationData.timestamp = bus.driver.currentLocation.updatedAt;
+    }
+
+    res.status(200).json({
+        status: 'success',
+        live: false,
+        data: locationData
+    });
+});
+
+// Attendance-driven route generation & optimization
+exports.getOptimizedRouteForBus = catchAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const { date } = req.query; // YYYY-MM-DD
+
+    const cleanId = String(id).replace(/^bus-/, '');
+    let query = mongoose.Types.ObjectId.isValid(cleanId) ? { _id: cleanId } : { busId: cleanId };
+    const bus = await Bus.findOne(query).populate('driver', 'name phoneNo email').lean();
+
+    if (!bus) {
+        return next(new AppError('Bus not found', 404));
+    }
+
+    // Determine target date
+    let serviceDateStr;
+    let targetDate;
+    if (date) {
+        serviceDateStr = date;
+        const parts = date.split('-');
+        targetDate = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+    } else {
+        const today = new Date();
+        serviceDateStr = today.toISOString().split('T')[0];
+        targetDate = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+    }
+
+    // 1. Fetch all assigned students
+    const assignedStudents = await Student.find({ busId: bus._id })
+        .select('name rollNo pickupLocation standard section phoneNo')
+        .lean();
+
+    // 2. Fetch pre-marked absences for the target service date
+    const absentRecords = await Attendance.find({
+        busId: bus._id,
+        time: targetDate,
+        isPreMarked: true,
+        attendance: 'absent'
+    }).select('studentId reason').lean();
+
+    const absentStudentIds = new Set(absentRecords.map(r => r.studentId.toString()));
+
+    // 3. Separate eligible vs absent students
+    const eligibleStudents = [];
+    const absentStudents = [];
+
+    assignedStudents.forEach(st => {
+        if (absentStudentIds.has(st._id.toString())) {
+            absentStudents.push({
+                ...st,
+                status: 'absent'
+            });
+        } else {
+            eligibleStudents.push({
+                ...st,
+                status: 'present'
+            });
+        }
+    });
+
+    // Helper to calculate distance in meters
+    function calculateDistanceMeters(coord1, coord2) {
+        if (!coord1 || !coord2) return Infinity;
+        const [lng1, lat1] = coord1;
+        const [lng2, lat2] = coord2;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // Helper to order stops from depot to school avoiding zigzagging
+    function orderStopsLogically(startStop, intermediateStops, endStop) {
+        const ordered = [startStop];
+        const remaining = [...intermediateStops];
+        let current = startStop;
+
+        while (remaining.length > 0) {
+            let nearestIdx = 0;
+            let minDistance = Infinity;
+            for (let i = 0; i < remaining.length; i++) {
+                const dist = calculateDistanceMeters(current.coordinates, remaining[i].coordinates);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    nearestIdx = i;
+                }
+            }
+            current = remaining.splice(nearestIdx, 1)[0];
+            ordered.push(current);
+        }
+
+        ordered.push(endStop);
+        return ordered;
+    }
+
+    // Helper to fetch actual road path from OSRM
+    async function fetchRoadGeometry(stopsList) {
+        if (!stopsList || stopsList.length < 2) return null;
+        try {
+            const coordinatesStr = stopsList
+                .map(s => `${s.coordinates[0].toFixed(6)},${s.coordinates[1].toFixed(6)}`)
+                .join(';');
+            const url = `https://router.project-osrm.org/route/v1/driving/${coordinatesStr}?overview=full&geometries=geojson`;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 4000);
+            const res = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.routes && data.routes[0]) {
+                    return {
+                        coordinates: data.routes[0].geometry.coordinates,
+                        distance: data.routes[0].distance,
+                        duration: data.routes[0].duration
+                    };
+                }
+            }
+        } catch (e) {
+            console.warn('[BusController] Road route fetch fallback:', e.message);
+        }
+        return null;
+    }
+
+    // 4. Build deduplicated intermediate stops
+    const intermediateStops = [];
+
+    // Eligible students
+    eligibleStudents.forEach((student) => {
+        if (student.pickupLocation && student.pickupLocation.lat && student.pickupLocation.lng) {
+            const studentCoord = [student.pickupLocation.lng, student.pickupLocation.lat];
+            const existing = intermediateStops.find(s => calculateDistanceMeters(s.coordinates, studentCoord) < 50);
+            if (existing) {
+                existing.students.push({ id: student._id, name: student.name, rollNo: student.rollNo });
+                if (!existing.name.includes(student.name)) {
+                    existing.name += `, ${student.name}`;
+                }
+            } else {
+                intermediateStops.push({
+                    id: `student-${student._id}`,
+                    name: `${student.name} (${student.rollNo})`,
+                    coordinates: studentCoord,
+                    type: 'pickup',
+                    students: [{ id: student._id, name: student.name, rollNo: student.rollNo }]
+                });
+            }
+        }
+    });
+
+    // Static pickup points
+    if (bus.pickupPoints && Array.isArray(bus.pickupPoints)) {
+        bus.pickupPoints.forEach((point, pIdx) => {
+            if (point.lng && point.lat) {
+                const pointCoord = [point.lng, point.lat];
+                const existing = intermediateStops.find(s => calculateDistanceMeters(s.coordinates, pointCoord) < 50);
+                if (!existing) {
+                    intermediateStops.push({
+                        id: `stop-${pIdx}`,
+                        name: point.name || `Stop ${pIdx + 1}`,
+                        coordinates: pointCoord,
+                        type: 'waypoint',
+                        students: []
+                    });
+                }
+            }
+        });
+    }
+
+    const startStop = {
+        id: 'start-depot',
+        name: bus.startLocation?.name || 'Bus Depot / Start',
+        coordinates: [bus.startLocation?.lng || 0, bus.startLocation?.lat || 0],
+        type: 'depot',
+        students: []
+    };
+
+    const endStop = {
+        id: 'end-school',
+        name: bus.endLocation?.name || 'School Destination',
+        coordinates: [bus.endLocation?.lng || 0, bus.endLocation?.lat || 0],
+        type: 'school',
+        students: []
+    };
+
+    // 5. Order stops logically to avoid criss-crossing
+    const orderedStops = orderStopsLogically(startStop, intermediateStops, endStop);
+
+    // 6. Fetch turn-by-turn road polyline (road snapped)
+    const roadData = await fetchRoadGeometry(orderedStops);
+    const routeCoordinates = (roadData && roadData.coordinates && roadData.coordinates.length > 0)
+        ? roadData.coordinates
+        : orderedStops.map(s => s.coordinates);
+
+    const geojson = {
+        type: 'Feature',
+        properties: {
+            busId: bus.busId,
+            busNo: bus.busNo,
+            serviceDate: serviceDateStr,
+            distanceMeters: roadData?.distance || null,
+            durationSeconds: roadData?.duration || null,
+            isRoadSnapped: !!(roadData && roadData.coordinates)
+        },
+        geometry: {
+            type: 'LineString',
+            coordinates: routeCoordinates
+        }
+    };
+
+    res.status(200).json({
+        status: 'success',
+        serviceDate: serviceDateStr,
+        bus: {
+            _id: bus._id,
+            busId: bus.busId,
+            busNo: bus.busNo,
+            capacity: bus.capacity,
+            driver: bus.driver
+        },
+        metrics: {
+            totalAssignedStudents: assignedStudents.length,
+            eligiblePresentStudents: eligibleStudents.length,
+            excludedAbsentStudents: absentStudents.length,
+            totalStops: orderedStops.length,
+            distanceKm: roadData?.distance ? (roadData.distance / 1000).toFixed(2) : null,
+            durationMinutes: roadData?.duration ? Math.round(roadData.duration / 60) : null
+        },
+        stops: orderedStops,
+        eligibleStudents: eligibleStudents,
+        absentStudents: absentStudents,
+        geojson: geojson
+    });
+});

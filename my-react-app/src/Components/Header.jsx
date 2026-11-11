@@ -1,14 +1,21 @@
 import React from 'react';
 import { Bus, MapPin, LogIn } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
 
-function Header({ currentPage, setCurrentPage, isLoggedIn, setIsLoggedIn, userRole }) {
+function Header({ isLoggedIn, setIsLoggedIn, userRole }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const isHomeActive = location.pathname === '/' || location.pathname === '/driver';
+  const isTrackerActive = location.pathname === '/tracking';
+
   return (
     <header className="py-5 px-8 sticky top-0 z-50 bg-clay-bg/80 backdrop-blur-md w-full">
       <nav className="flex justify-between items-center max-w-6xl mx-auto py-2.5 px-6 bg-white rounded-3xl border-3 border-white shadow-[0_8px_32px_rgba(166,180,200,0.15),inset_-4px_-4px_8px_rgba(166,180,200,0.1),inset_4px_4px_8px_rgba(255,255,255,0.9)]">
         {/* Brand/Logo Section */}
         <div 
           className="flex items-center gap-3 cursor-pointer select-none" 
-          onClick={() => setCurrentPage('home')}
+          onClick={() => navigate('/')}
         >
           <svg 
             viewBox="0 0 160 160" 
@@ -60,9 +67,9 @@ function Header({ currentPage, setCurrentPage, isLoggedIn, setIsLoggedIn, userRo
         <ul className="flex items-center gap-2 list-none">
           <li>
             <button
-              onClick={() => setCurrentPage('home')}
+              onClick={() => navigate('/')}
               className={`font-friendly font-semibold text-[1rem] bg-transparent border-none py-2 px-5 rounded-xl cursor-pointer transition-all duration-200 ${
-                currentPage === 'home' 
+                isHomeActive 
                   ? 'bg-clay-bg text-clay-blue shadow-[inset_2px_2px_5px_rgba(166,180,200,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.7)]' 
                   : 'text-clay-text-muted hover:text-clay-blue'
               }`}
@@ -72,16 +79,9 @@ function Header({ currentPage, setCurrentPage, isLoggedIn, setIsLoggedIn, userRo
           </li>
           <li>
             <button
-              onClick={() => {
-                if (isLoggedIn) {
-                  alert('You are already logged in! Let\'s go to your dashboard on the Home page.');
-                  setCurrentPage('home');
-                } else {
-                  setCurrentPage('login');
-                }
-              }}
+              onClick={() => navigate('/tracking')}
               className={`font-friendly font-semibold text-[1rem] bg-transparent border-none py-2 px-5 rounded-xl cursor-pointer transition-all duration-200 ${
-                (currentPage === 'login' || currentPage === 'register') 
+                isTrackerActive 
                   ? 'bg-clay-bg text-clay-blue shadow-[inset_2px_2px_5px_rgba(166,180,200,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.7)]' 
                   : 'text-clay-text-muted hover:text-clay-blue'
               }`}
@@ -96,13 +96,16 @@ function Header({ currentPage, setCurrentPage, isLoggedIn, setIsLoggedIn, userRo
           {isLoggedIn ? (
             <div className="flex items-center gap-3">
               <div className="clay-badge clay-badge-blue border-2 text-[0.9rem] py-1.5 px-3">
-                {userRole === 'student' ? '🎒 Student' : userRole === 'parent' ? '🏡 Parent' : '🚌 Driver'}
+                {userRole === 'student' ? '🎒 Student' : userRole === 'parent' ? '🏡 Parent' : userRole === 'driver' ? '🚌 Driver' : '🏫 School Admin'}
               </div>
               <button 
-                className="clay-btn clay-btn-orange text-[0.95rem] py-2 px-5 rounded-2xl" 
+                className="clay-btn clay-btn-orange text-[0.95rem] py-2 px-5 rounded-2xl cursor-pointer" 
                 onClick={() => {
                   setIsLoggedIn(false);
-                  setCurrentPage('home');
+                  localStorage.removeItem('token');
+                  localStorage.removeItem('refreshToken');
+                  localStorage.removeItem('currentUser');
+                  navigate('/');
                 }}
               >
                 Logout
@@ -110,8 +113,8 @@ function Header({ currentPage, setCurrentPage, isLoggedIn, setIsLoggedIn, userRo
             </div>
           ) : (
             <button 
-              className="clay-btn clay-btn-blue text-[0.95rem] py-2 px-5 rounded-2xl" 
-              onClick={() => setCurrentPage('login')}
+              className="clay-btn clay-btn-blue text-[0.95rem] py-2 px-5 rounded-2xl cursor-pointer" 
+              onClick={() => navigate('/login')}
             >
               <LogIn size={18} />
               Login

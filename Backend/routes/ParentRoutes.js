@@ -7,15 +7,20 @@ const {
   updateParent,
   deleteParent,
   parentLogin,
-  parentRefreshToken
+  parentRefreshToken,
+  getParentDashboard
 } = require("../controllers/ParentController");
+const { protect, authorize } = require("../middlewares/auth");
 
 router.post("/register", createParent);
 router.post("/login", parentLogin);
 router.post("/refresh-token", parentRefreshToken);
-router.get("/institute/:instituteId", getParentsByInstitute);
-router.get("/bus/:busId", getParentsByBus);
-router.put("/:parentId", updateParent);
-router.delete("/:parentId", deleteParent);
+
+// Protected routes
+router.get("/dashboard", protect, authorize("parent"), getParentDashboard);
+router.get("/institute/:instituteId", protect, authorize("admin"), getParentsByInstitute);
+router.get("/bus/:busId", protect, authorize("admin", "driver"), getParentsByBus);
+router.put("/:parentId", protect, authorize("admin", "parent"), updateParent);
+router.delete("/:parentId", protect, authorize("admin"), deleteParent);
 
 module.exports = router;

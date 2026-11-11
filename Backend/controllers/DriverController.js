@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 const Driver = require('../models/Driver');
 const Bus = require('../models/Bus');
+const Trip = require('../models/Trip');
+const Student = require('../models/StudentModel');
+const Parent = require('../models/ParentModel');
+const Attendance = require('../models/AttendanceModel');
+const sendNotification = require('../utils/sendNotifications');
 const jwt = require('jsonwebtoken');
 
 const catchAsync = (fn) => {
@@ -75,6 +80,7 @@ exports.registerDriver = catchAsync(async (req, res, next) => {
 
 exports.driverLogin = catchAsync(async (req, res, next) => {
     const { email, password } = req.body;
+    console.log("Body",req.body);
 
     if (!email || !password) {
         return next(new AppError('Email and password are required', 400));
@@ -120,14 +126,22 @@ exports.driverLogin = catchAsync(async (req, res, next) => {
         busDetails = await Bus.findById(driver.Bus_id).select('busNo busId startLocation endLocation capacity');
     }
 
+    const driverDataWithRole = {
+        ...driverResponse,
+        role: 'driver',
+        busId: driver.Bus_id
+    };
+
     res.status(200).json({
+        success: true,
         status: 'success',
         message: 'Login successful',
         token: accessToken,
         accessToken: accessToken,
         refreshToken: refreshToken,
+        driver: driverDataWithRole,
         data: {
-            driver: driverResponse,
+            driver: driverDataWithRole,
             assignedBus: busDetails
         }
     });
@@ -503,4 +517,333 @@ exports.driverRefreshToken = catchAsync(async (req, res, next) => {
         accessToken: newAccessToken,
         refreshToken: newRefreshToken
     });
-}); 
+});
+
+// Get assigned route, stops, and student manifest for driver
+exports.getAssignedRouteAndManifest = catchAsync(async (req, res, next) => {
+    const driverId = req.user.id;
+    const driver = await Driver.findById(driverId).populate('Bus_id');
+
+    if (!driver) {
+        return next(new AppError('Driver not found', 404));
+    }
+
+    if (!driver.Bus_id) {
+        return res.status(200).json({
+            status: 'success',
+            hasAssignedBus: false,
+            message: 'No bus currently assigned to your account'
+        });
+    }
+
+    const bus = driver.Bus_id;
+    const students = await Student.find({ busId: bus._id })
+        .select('name rollNo phoneNo pickupLocation standard section')
+        .lean();
+
+    // Check pre-marked absences for today
+    const today = new Date();
+    const startOfToday = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+    const absentRecords = await Attendance.find({
+        busId: bus._id,
+        time: startOfToday,
+        isPreMarked: true,
+        attendance: 'absent'
+    }).select('studentId reason').lean();
+
+    const absentStudentIds = new Set(absentRecords.map(r => r.studentId.toString()));
+
+    const manifest = students.map(student => ({
+        studentId: student._id,
+        studentName: student.name,
+        rollNo: student.rollNo,
+        phoneNo: student.phoneNo,
+        pickupLocation: student.pickupLocation,
+        standard: student.standard,
+        section: student.section,
+        attendanceStatus: absentStudentIds.has(student._id.toString()) ? 'absent' : 'present',
+        pickupStatus: absentStudentIds.has(student._id.toString()) ? 'absent' : 'waiting'
+    }));
+
+    // Check if there is an active trip right now
+    const activeTrip = await Trip.findOne({
+        driverId: driver._id,
+        status: 'ongoing'
+    }).lean();
+
+    res.status(200).json({
+        status: 'success',
+        hasAssignedBus: true,
+        bus: {
+            _id: bus._id,
+            busId: bus.busId,
+            busNo: bus.busNo,
+            startLocation: bus.startLocation,
+            endLocation: bus.endLocation,
+            pickupPoints: bus.pickupPoints || [],
+            capacity: bus.capacity
+        },
+        activeTrip: activeTrip || null,
+        manifest: activeTrip ? activeTrip.studentManifest : manifest
+    });
+});
+
+// Start a live trip
+exports.startTrip = catchAsync(async (req, res, next) => {
+    const driverId = req.user.id;
+    const { tripType } = req.body; // 'pickup' | 'dropoff'
+
+    const driver = await Driver.findById(driverId).populate('Bus_id');
+    if (!driver || !driver.Bus_id) {
+        return next(new AppError('Driver has no assigned bus to start a trip', 400));
+    }
+
+    // Check if active trip already exists
+    let existingTrip = await Trip.findOne({
+        driverId: driverId,
+        status: 'ongoing'
+    });
+
+    if (existingTrip) {
+        return res.status(200).json({
+            status: 'success',
+            message: 'Resumed existing active trip',
+            data: existingTrip
+        });
+    }
+
+    const bus = driver.Bus_id;
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Build manifest from students assigned to bus
+    const students = await Student.find({ busId: bus._id }).lean();
+    
+    // Check pre-marked absences for today
+    const today = new Date();
+    const startOfToday = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+    const absentRecords = await Attendance.find({
+        busId: bus._id,
+        time: startOfToday,
+        isPreMarked: true,
+        attendance: 'absent'
+    }).lean();
+
+    const absentStudentIds = new Set(absentRecords.map(r => r.studentId.toString()));
+
+    const studentManifest = students.map(student => {
+        const isAbsent = absentStudentIds.has(student._id.toString());
+        return {
+            studentId: student._id,
+            studentName: student.name,
+            rollNo: student.rollNo,
+            phoneNo: student.phoneNo,
+            pickupLocation: student.pickupLocation,
+            attendanceStatus: isAbsent ? 'absent' : 'present',
+            pickupStatus: isAbsent ? 'absent' : 'waiting'
+        };
+    });
+
+    const newTrip = await Trip.create({
+        busId: bus._id,
+        driverId: driver._id,
+        instituteId: driver.Institute,
+        status: 'ongoing',
+        tripType: tripType || 'pickup',
+        serviceDate: todayStr,
+        startTime: new Date(),
+        studentManifest: studentManifest
+    });
+
+    driver.status = 'active';
+    await driver.save();
+
+    // Broadcast trip-start event via socket
+    if (req.io) {
+        req.io.to(bus._id.toString()).to(`bus-${bus._id.toString()}`).emit('trip-started', {
+            tripId: newTrip._id,
+            busId: bus._id,
+            busNo: bus.busNo,
+            driverName: driver.name,
+            tripType: newTrip.tripType,
+            startTime: newTrip.startTime
+        });
+    }
+
+    // Send departure notifications to present students' parents
+    const presentStudents = studentManifest.filter(s => s.attendanceStatus === 'present');
+    presentStudents.forEach(async (studentItem) => {
+        try {
+            const parent = await Parent.findOne({
+                ChildsRollNo: studentItem.rollNo,
+                instituteId: driver.Institute
+            });
+            if (parent && parent.fcmToken) {
+                await sendNotification(
+                    parent.fcmToken,
+                    'Bus On The Move! 🚌',
+                    `School Bus ${bus.busNo} has started its journey for ${studentItem.studentName}.`
+                );
+            }
+        } catch (e) {
+            console.error('Failed to send trip start push:', e.message);
+        }
+    });
+
+    res.status(201).json({
+        status: 'success',
+        message: 'Trip started successfully',
+        data: newTrip
+    });
+});
+
+// Get ongoing active trip for driver or by busId
+exports.getActiveTrip = catchAsync(async (req, res, next) => {
+    let query = { status: 'ongoing' };
+
+    if (req.query.busId) {
+        query.busId = req.query.busId;
+    } else if (req.user && req.user.role === 'driver') {
+        query.driverId = req.user.id;
+    } else if (req.user && req.user.busId) {
+        query.busId = req.user.busId;
+    } else {
+        return next(new AppError('busId query parameter is required', 400));
+    }
+
+    const trip = await Trip.findOne(query)
+        .populate('busId', 'busNo busId startLocation endLocation pickupPoints')
+        .populate('driverId', 'name phoneNo email')
+        .lean();
+
+    res.status(200).json({
+        status: 'success',
+        data: trip || null
+    });
+});
+
+// Update student pickup or drop-off status in active trip
+exports.updateStudentPickupStatus = catchAsync(async (req, res, next) => {
+    const { tripId, studentId, status } = req.body;
+
+    if (!tripId || !studentId || !status) {
+        return next(new AppError('tripId, studentId, and status are required', 400));
+    }
+
+    const allowedStatuses = ['waiting', 'picked_up', 'dropped_off', 'absent', 'not_picked_up'];
+    if (!allowedStatuses.includes(status)) {
+        return next(new AppError(`Invalid status: ${status}. Must be one of: ${allowedStatuses.join(', ')}`, 400));
+    }
+
+    const trip = await Trip.findById(tripId);
+    if (!trip) {
+        return next(new AppError('Trip not found', 404));
+    }
+
+    const manifestItem = trip.studentManifest.find(item => item.studentId.toString() === studentId.toString());
+    if (!manifestItem) {
+        return next(new AppError('Student not found in this trip manifest', 404));
+    }
+
+    manifestItem.pickupStatus = status;
+    manifestItem.updatedBy = req.user.id;
+    if (status === 'picked_up') {
+        manifestItem.pickedUpAt = new Date();
+    } else if (status === 'dropped_off') {
+        manifestItem.droppedOffAt = new Date();
+    }
+
+    await trip.save();
+
+    // Persist to Attendance model for historical reporting
+    try {
+        const attendanceRecord = new Attendance({
+            studentId: studentId,
+            instituteId: trip.instituteId,
+            busId: trip.busId,
+            attendance: (status === 'picked_up' || status === 'dropped_off') ? 'present' : (status === 'absent' ? 'absent' : 'not-marked'),
+            time: new Date()
+        });
+        await attendanceRecord.save();
+    } catch (attErr) {
+        console.error('Error saving attendance log:', attErr.message);
+    }
+
+    // Broadcast manifest update via socket
+    if (req.io) {
+        req.io.to(trip.busId.toString()).to(`bus-${trip.busId.toString()}`).emit('student-status-updated', {
+            tripId: trip._id,
+            busId: trip.busId,
+            studentId: studentId,
+            studentName: manifestItem.studentName,
+            status: status,
+            timestamp: new Date()
+        });
+    }
+
+    // Send push notification to parent
+    try {
+        const parent = await Parent.findOne({
+            ChildsRollNo: manifestItem.rollNo,
+            instituteId: trip.instituteId
+        });
+
+        if (parent && parent.fcmToken) {
+            let notifTitle = 'Student Update 🚸';
+            let notifBody = `${manifestItem.studentName}'s status is now ${status}.`;
+
+            if (status === 'picked_up') {
+                notifTitle = 'Child Boarded Bus ✅';
+                notifBody = `${manifestItem.studentName} was picked up and has boarded the school bus.`;
+            } else if (status === 'dropped_off') {
+                notifTitle = 'Child Dropped Off 🏡';
+                notifBody = `${manifestItem.studentName} has been safely dropped off at destination.`;
+            } else if (status === 'absent') {
+                notifTitle = 'Marked Absent ❌';
+                notifBody = `${manifestItem.studentName} was marked absent for the route.`;
+            }
+
+            await sendNotification(parent.fcmToken, notifTitle, notifBody);
+        }
+    } catch (notifErr) {
+        console.error('Notification error on pickup status update:', notifErr.message);
+    }
+
+    res.status(200).json({
+        status: 'success',
+        message: `Student status updated to ${status}`,
+        data: manifestItem
+    });
+});
+
+// End active trip
+exports.endTrip = catchAsync(async (req, res, next) => {
+    const driverId = req.user.id;
+    const { tripId } = req.body;
+
+    let query = { driverId: driverId, status: 'ongoing' };
+    if (tripId) query._id = tripId;
+
+    const trip = await Trip.findOne(query);
+    if (!trip) {
+        return next(new AppError('No ongoing trip found to end', 404));
+    }
+
+    trip.status = 'completed';
+    trip.endTime = new Date();
+    await trip.save();
+
+    if (req.io) {
+        req.io.to(trip.busId.toString()).to(`bus-${trip.busId.toString()}`).emit('trip-ended', {
+            tripId: trip._id,
+            busId: trip.busId,
+            endTime: trip.endTime
+        });
+    }
+
+    res.status(200).json({
+        status: 'success',
+        message: 'Trip completed successfully',
+        data: trip
+    });
+});
+ 

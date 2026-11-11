@@ -47,25 +47,47 @@ const corsOptions = {
 };
 
 
-const limiter = rateLimit({
+// General API rate limiter with generous threshold for dashboard usage
+const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 15, // 15 requests per IP
+  max: 1000, // 1000 requests per IP per 15 minutes for smooth real-time dashboard operations
+  standardHeaders: true,
+  legacyHeaders: false,
   message: {
     success: false,
     message: "Too many requests, please try again later.",
   },
 });
 
+// Stricter rate limiter specifically for auth/OTP endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 60, // 60 attempts per 15 minutes
+  message: {
+    success: false,
+    message: "Too many authentication attempts, please try again later.",
+  },
+});
+
 app.use(loggingMiddleware);
 app.use(cors(corsOptions));
-app.use(limiter);
+app.use("/api/otp", authLimiter);
+app.use(generalLimiter);
 app.use(express.json());
 
 const io = new Server(server, {
   cors: corsOptions
 });
 
+// Cache of latest known locations for active buses
+const latestBusLocations = {};
 
+// Attach io and latest locations cache to all requests
+app.use((req, res, next) => {
+  req.io = io;
+  req.latestBusLocations = latestBusLocations;
+  next();
+});
 
 // Routes
 app.use("/api/otp", otpRoutes);
@@ -80,32 +102,65 @@ app.use("/api/driver", driverRoutes);
 app.use("/api/bus", busRoutes);
 app.use("/api/notification", notificationRoutes);
 
-
-
-
-
-//socket.io 
+// Socket.IO real-time connection and rooms
 io.on('connection', (socket) => {
-  console.log('connected', socket.id);
+  console.log('Client connected to Socket.IO:', socket.id);
 
+  // Join room for a bus (supports both raw busId and bus-prefixed busId)
   socket.on('join_room', (busId) => {
-    socket.join(busId);
-    console.log(`User ${socket.id} joined room ${busId}`);
+    if (!busId) return;
+    const cleanBusId = String(busId).replace(/^bus-/, '');
+    socket.join(cleanBusId);
+    socket.join(`bus-${cleanBusId}`);
+    console.log(`User ${socket.id} joined rooms ${cleanBusId} and bus-${cleanBusId}`);
+
+    // If we have a cached last known location for this bus, send immediately
+    if (latestBusLocations[cleanBusId]) {
+      socket.emit('receiveInfo', latestBusLocations[cleanBusId]);
+    }
   });
 
+  // Driver GPS info broadcast
   socket.on('sendInfo', (information) => {
-    let { name, busId, lat, lng } = information;
-    console.log("Received info:", information);
+    if (!information || typeof information !== 'object') return;
+    let { name, busId, lat, lng, speed, heading, accuracy, status, tripId } = information;
+
+    if (!busId) return;
+    const cleanBusId = String(busId).replace(/^bus-/, '');
 
     lat = Number(lat);
     lng = Number(lng);
 
-    if (!busId || isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      console.log("Invalid payload received:", information);
+    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      console.warn("Invalid coordinates payload rejected:", information);
       return;
     }
 
-    io.to(busId).emit('receiveInfo', { name, busId, lat, lng });
+    const payload = {
+      name: name || "School Bus",
+      busId: cleanBusId,
+      lat,
+      lng,
+      speed: Number(speed) || 0,
+      heading: Number(heading) || 0,
+      accuracy: Number(accuracy) || 0,
+      status: status || 'in_transit',
+      tripId: tripId || null,
+      timestamp: new Date().toISOString()
+    };
+
+    // Store in cache
+    latestBusLocations[cleanBusId] = payload;
+
+    // Broadcast to room subscribers (parents, students, admins)
+    io.to(cleanBusId).to(`bus-${cleanBusId}`).emit('receiveInfo', payload);
+  });
+
+  socket.on('leave_room', (busId) => {
+    if (!busId) return;
+    const cleanBusId = String(busId).replace(/^bus-/, '');
+    socket.leave(cleanBusId);
+    socket.leave(`bus-${cleanBusId}`);
   });
 
   socket.on('disconnect', () => {

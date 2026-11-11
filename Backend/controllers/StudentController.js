@@ -266,9 +266,13 @@ exports.studentLogin = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Login successful",
+      token: accessToken,
       accessToken,
       refreshToken,
-      student: studentResponse,
+      student: {
+        ...studentResponse,
+        role: "student"
+      },
     });
   } catch (err) {
     return res.status(500).json({
@@ -334,5 +338,34 @@ exports.studentRefreshToken = async (req, res) => {
       success: false,
       message: err.message,
     });
+  }
+};
+
+exports.getStudentDashboard = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const student = await Student.findById(studentId).populate('busId').lean();
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    let activeTrip = null;
+    const busRefId = student.busId ? (student.busId._id || student.busId) : null;
+    if (busRefId) {
+      const Trip = require('../models/Trip');
+      activeTrip = await Trip.findOne({
+        busId: busRefId,
+        status: 'ongoing'
+      }).populate('driverId', 'name phoneNo email').lean();
+    }
+
+    return res.status(200).json({
+      success: true,
+      student: { ...student, role: 'student' },
+      bus: student.busId || null,
+      activeTrip: activeTrip || null
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 };

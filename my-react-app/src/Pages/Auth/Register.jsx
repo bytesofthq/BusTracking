@@ -1,33 +1,36 @@
-import React, { useState } from 'react';
-import { Mail, Lock, User, Shield, GraduationCap, Users, Truck, ArrowLeft, CheckCircle, Phone, FileText, MapPin } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { 
+  Mail, Lock, User, Shield, GraduationCap, Users, Truck, 
+  ArrowLeft, CheckCircle, Phone, FileText, MapPin, Building2, RefreshCw 
+} from 'lucide-react';
 import { getFCMToken } from '../../firebase/fcm';
+import { useNavigate } from 'react-router-dom';
 
-const MOCK_INSTITUTES = [
-  { id: '64f7b6b2f1d2e3001c9a8b11', name: 'Oakridge International School 🏫' },
-  { id: '64f7b6c8f1d2e3001c9a8b12', name: 'Springdale High School 🎒' },
-  { id: '64f7b6d5f1d2e3001c9a8b13', name: 'Saint Mary Convent Academy 📚' }
-];
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
-const MOCK_BUSES = [
-  { id: '64f8c122f1d2e3001c9a9c21', name: 'Bus 101 - route North Side 🚌' },
-  { id: '64f8c13cf1d2e3001c9a9c22', name: 'Bus 102 - route East Avenue 🚌' },
-  { id: '64f8c15bf1d2e3001c9a9c23', name: 'Bus 204 - route South Cross 🚌' }
-];
-
-function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
+function Register({ setIsLoggedIn, setUserRole }) {
+  const navigate = useNavigate();
   const [role, setRole] = useState('student'); // student | parent | driver
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   
-  // Student Specific Fields (StudentModel.js)
+  // Shared Dynamic School & Bus Data
+  const [institutes, setInstitutes] = useState([]);
+  const [availableBuses, setAvailableBuses] = useState([]);
+  const [loadingInstitutes, setLoadingInstitutes] = useState(false);
+  const [loadingBuses, setLoadingBuses] = useState(false);
+
+  const [instituteId, setInstituteId] = useState('');
+  const [busId, setBusId] = useState('');
+
+  // Student & Parent Specific Fields
   const [phoneNo, setPhoneNo] = useState('');
   const [rollNo, setRollNo] = useState('');
   const [standard, setStandard] = useState('');
   const [section, setSection] = useState('');
-  const [instituteId, setInstituteId] = useState('');
-  const [busId, setBusId] = useState('');
+  const [childsName, setChildsName] = useState('');
   const [pickupLat, setPickupLat] = useState('');
   const [pickupLng, setPickupLng] = useState('');
   const [otp, setOtp] = useState('');
@@ -37,12 +40,57 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
   const [sendingOtp, setSendingOtp] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
 
-  // Other Roles specific fields
-  const [studentId, setStudentId] = useState(''); // Parent
-  const [driverBusId, setDriverBusId] = useState(''); // Driver
-
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Load registered institutes from real backend
+  useEffect(() => {
+    const fetchInstitutes = async () => {
+      try {
+        setLoadingInstitutes(true);
+        const res = await fetch(`${API_BASE}/api/institute/public`);
+        const data = await res.json();
+        if (res.ok && data.institutes) {
+          setInstitutes(data.institutes);
+        }
+      } catch (err) {
+        console.error('[Register] Error loading public institutes:', err);
+      } finally {
+        setLoadingInstitutes(false);
+      }
+    };
+
+    fetchInstitutes();
+  }, []);
+
+  // When selected institute changes, dynamically load its assigned buses
+  useEffect(() => {
+    if (!instituteId) {
+      setAvailableBuses([]);
+      setBusId('');
+      return;
+    }
+
+    const fetchBusesForInstitute = async () => {
+      try {
+        setLoadingBuses(true);
+        const res = await fetch(`${API_BASE}/api/bus/public/${instituteId}`);
+        const data = await res.json();
+        if (res.ok && data.buses) {
+          setAvailableBuses(data.buses);
+        } else {
+          setAvailableBuses([]);
+        }
+      } catch (err) {
+        console.error('[Register] Error loading buses for institute:', err);
+        setAvailableBuses([]);
+      } finally {
+        setLoadingBuses(false);
+      }
+    };
+
+    fetchBusesForInstitute();
+  }, [instituteId]);
 
   const handleGetLocation = () => {
     if (!navigator.geolocation) {
@@ -58,9 +106,10 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
       },
       (error) => {
         console.error(error);
-        alert("Unable to retrieve location. Please type coordinates manually! ✍️");
+        alert("Unable to retrieve GPS automatically. Please enter coordinates manually! ✍️");
         setLocationLoading(false);
-      }
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
@@ -72,23 +121,21 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
     setSendingOtp(true);
     setError('');
     try {
-      const response = await fetch('http://localhost:4000/api/otp/send-otp', {
+      const response = await fetch(`${API_BASE}/api/otp/send-otp`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
       const data = await response.json();
       if (response.ok && data.success) {
         setIsOtpSent(true);
-        alert(`OTP sent successfully to ${email}! 🚀 Check your inbox!`);
+        alert(`OTP code sent to ${email}! 🚀 Check your inbox.`);
       } else {
-        alert(data.message || 'Failed to send OTP. Please check the email and try again.');
+        alert(data.message || 'Failed to send OTP. Please try again.');
       }
     } catch (err) {
       console.error('[OTP Error]', err);
-      alert('Failed to connect to the backend server. Make sure your backend server is running on port 4000!');
+      alert('Backend connection error. Please make sure server is running.');
     } finally {
       setSendingOtp(false);
     }
@@ -96,8 +143,8 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name || !email || !password || !confirmPassword) {
-      setError('Please fill in all the base details! 📝');
+    if (!name || !password || !confirmPassword) {
+      setError('Please fill in all the required base fields! 📝');
       return;
     }
     if (password !== confirmPassword) {
@@ -105,26 +152,22 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
       return;
     }
 
-    // Role specific validation
+    if (!instituteId) {
+      setError('Please select your School/Institute! 🏫');
+      return;
+    }
+    if (!busId) {
+      setError('Please select your assigned Bus Route! 🚌');
+      return;
+    }
+
     if (role === 'student') {
-      if (!instituteId) {
-        setError('Please select your School/Institute! 🏫');
+      if (!email) {
+        setError('Please enter your email address! ✉️');
         return;
       }
-      if (!busId) {
-        setError('Please select your assigned Bus Route! 🚌');
-        return;
-      }
-      if (!phoneNo) {
-        setError('Please tell us your Phone Number! 📱');
-        return;
-      }
-      if (!rollNo) {
-        setError('Please tell us your Roll Number! 🎒');
-        return;
-      }
-      if (!standard || !section) {
-        setError('Please enter your class Standard and Section! 📝');
+      if (!phoneNo || !rollNo || !standard || !section) {
+        setError('Please fill in phone, roll number, grade/class and section! 🎒');
         return;
       }
       if (!pickupLat || !pickupLng) {
@@ -132,17 +175,20 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
         return;
       }
       if (!otp) {
-        setError('Please enter the OTP verification code! ✉️');
+        setError('Please enter the OTP verification code sent to your email! ✉️');
         return;
       }
     } else if (role === 'parent') {
-      if (!studentId) {
-        setError('Please link your child\'s Student ID! 🎒');
+      if (!phoneNo) {
+        setError('Please provide your phone number for SMS and notifications! 📱');
         return;
       }
-    } else if (role === 'driver') {
-      if (!driverBusId) {
-        setError('Please select your assigned Bus ID! 🛞');
+      if (!childsName || !rollNo || !standard || !section) {
+        setError('Please provide your child\'s name, roll number, class and section! 🎒');
+        return;
+      }
+      if (!pickupLat || !pickupLng) {
+        setError('Please specify your morning pickup coordinates! 📍');
         return;
       }
     }
@@ -150,27 +196,22 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
     setError('');
     setLoading(true);
 
+    let generatedFcmToken = '';
     try {
-      // Generate FCM token
       const token = await getFCMToken();
       if (token) {
-        console.log(`[FCM] Token generated successfully for register (${role}):`, token);
+        generatedFcmToken = token;
         localStorage.setItem('fcmToken', token);
-      } else {
-        console.warn('[FCM] Permission denied or token generation failed.');
       }
     } catch (err) {
-      console.error('[FCM] Error requesting token during register:', err);
+      console.warn('[Register] Push token skipped:', err);
     }
 
-    // Perform actual API register
     try {
       if (role === 'student') {
-        const response = await fetch('http://localhost:4000/api/student/register', {
+        const response = await fetch(`${API_BASE}/api/student/register`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name,
             email,
@@ -180,7 +221,7 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
               lat: Number(pickupLat),
               lng: Number(pickupLng),
             },
-            fcmToken: localStorage.getItem('fcmToken') || '',
+            fcmToken: generatedFcmToken || localStorage.getItem('fcmToken') || 'default-token',
             phoneNo,
             rollNo,
             standard,
@@ -192,61 +233,60 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
 
         const data = await response.json();
         if (!response.ok || !data.success) {
-          setError(data.message || 'Registration failed ❌');
+          setError(data.message || 'Student registration failed ❌');
           setLoading(false);
           return;
         }
 
-        console.log('[Register] Student registered successfully:', data);
-        alert('Student registered successfully! 🎉');
-        localStorage.setItem('currentUser', JSON.stringify(data.student || { name, email, role }));
+        alert('Student registered successfully! 🎉 Please log in.');
+        navigate('/login');
       } else if (role === 'parent') {
-        // If parent registration endpoints are also expected:
-        const response = await fetch('http://localhost:4000/api/parent/register', {
+        const response = await fetch(`${API_BASE}/api/parent/register`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             parentName: name,
-            childsName: 'Child of ' + name, 
-            instituteId: '64f7b6b2f1d2e3001c9a8b11', // default mock ObjectId since parent form is simple
-            busId: '64f8c122f1d2e3001c9a9c21', 
-            pickupLocation: { lat: 0, lng: 0 },
-            fcmToken: localStorage.getItem('fcmToken') || '',
-            phoneNo: '+123456789', // mock
-            ChildsRollNo: studentId,
-            ChildsClass: 'Class 10',
-            ChildsSection: 'A',
+            childsName: childsName || `Child of ${name}`,
+            instituteId,
+            busId,
+            pickupLocation: {
+              lat: Number(pickupLat),
+              lng: Number(pickupLng),
+            },
+            fcmToken: generatedFcmToken || localStorage.getItem('fcmToken') || 'default-token',
+            phoneNo,
+            ChildsRollNo: rollNo,
+            ChildsClass: standard,
+            ChildsSection: section,
             password,
           }),
         });
+
         const data = await response.json();
         if (!response.ok || !data.success) {
-          setError(data.message || 'Registration failed ❌');
+          setError(data.message || 'Parent registration failed ❌');
           setLoading(false);
           return;
         }
-        alert('Parent registered successfully! 🎉');
-        localStorage.setItem('currentUser', JSON.stringify(data.parent || { name, email, role }));
+
+        alert('Parent registered successfully! 🎉 Please log in.');
+        navigate('/login');
+      } else if (role === 'driver') {
+        alert('Driver accounts are registered directly by the School Fleet Administrator for safety verification. Please contact your transport office.');
+        setLoading(false);
+        return;
       }
     } catch (err) {
       console.error('[Register error]', err);
       setError('Connection failed. Make sure the backend server is running! ❌');
-      setLoading(false);
-      return;
     } finally {
       setLoading(false);
     }
-
-    setIsLoggedIn(true);
-    setUserRole(role);
-    setCurrentPage('home');
   };
 
   return (
     <div className="flex justify-center items-center py-12 px-6 flex-grow min-h-[80vh]">
-      <div className="clay-card w-full max-w-[480px] bg-white text-center anim-float">
+      <div className="clay-card w-full max-w-[500px] bg-white text-center anim-float">
         {/* Playful Header */}
         <div className="flex flex-col items-center gap-2 mb-8">
           <div className={`flex items-center justify-center w-20 h-20 rounded-full border-4 border-white/40 shadow-[inset_-6px_-6px_12px_rgba(0,0,0,0.15),inset_6px_6px_12px_rgba(255,255,255,0.4),0_8px_20px_rgba(0,0,0,0.15)] mb-4 transition-all duration-300 ${
@@ -257,7 +297,9 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
             {role === 'driver' && <Truck size={36} color="#ffffff" />}
           </div>
           <h2 className="text-3xl font-friendly text-clay-text-dark font-semibold">Create Account</h2>
-          <p className="text-[0.95rem] text-clay-text-muted max-w-[300px]">Join TrackMyBus to begin tracking school buses live!</p>
+          <p className="text-[0.95rem] text-clay-text-muted max-w-[320px]">
+            Join TrackMyBus to view live tracking and stay updated on your school rides!
+          </p>
         </div>
 
         {/* Role Selector Tabs */}
@@ -293,7 +335,7 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
                 : 'text-clay-text-muted hover:text-clay-yellow'
             }`}
           >
-            🚌 Driver
+            🚌 Driver Info
           </button>
         </div>
 
@@ -303,12 +345,14 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
 
           {/* Full Name Input */}
           <div className="flex flex-col">
-            <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Full Name</label>
+            <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">
+              {role === 'parent' ? 'Parent Full Name' : 'Full Name'}
+            </label>
             <div className="relative flex items-center">
               <User size={18} className="text-slate-400 absolute left-4 z-10" />
               <input
                 type="text"
-                placeholder="Alex Morgan"
+                placeholder="e.g. Sarah Jenkins"
                 className="clay-input pl-11"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -316,257 +360,254 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
             </div>
           </div>
 
-          {/* Email Input */}
-          <div className="flex flex-col">
-            <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Email Address</label>
-            <div className="relative flex items-center">
-              <Mail size={18} className="text-slate-400 absolute left-4 z-10" />
-              <input
-                type="email"
-                placeholder="alex@school.com"
-                className="clay-input pl-11"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+          {/* Email Address */}
+          {role === 'student' && (
+            <div className="flex flex-col">
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Student Email Address</label>
+              <div className="relative flex items-center">
+                <Mail size={18} className="text-slate-400 absolute left-4 z-10" />
+                <input
+                  type="email"
+                  placeholder="student@school.edu"
+                  className="clay-input pl-11"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Dynamic School & Bus Selection */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex flex-col">
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">School / Institute</label>
+              <select
+                className="clay-input bg-white cursor-pointer"
+                value={instituteId}
+                onChange={(e) => setInstituteId(e.target.value)}
+              >
+                <option value="">{loadingInstitutes ? 'Loading schools...' : 'Select School'}</option>
+                {institutes.map((inst) => (
+                  <option key={inst._id} value={inst._id}>{inst.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col">
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Assigned Bus</label>
+              <select
+                className="clay-input bg-white cursor-pointer"
+                value={busId}
+                onChange={(e) => setBusId(e.target.value)}
+                disabled={!instituteId || loadingBuses}
+              >
+                <option value="">
+                  {!instituteId ? 'Select school first' : loadingBuses ? 'Loading buses...' : availableBuses.length === 0 ? 'No buses registered' : 'Select Bus Route'}
+                </option>
+                {availableBuses.map((b) => (
+                  <option key={b._id} value={b._id}>
+                    {b.busNo} ({b.busId})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {/* Dynamic Role-Specific Fields */}
-          {role === 'student' && (
-            <>
-              {/* School and Bus Selection */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col">
-                  <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">School/Institute</label>
-                  <select
-                    className="clay-input pr-4 bg-white cursor-pointer"
-                    value={instituteId}
-                    onChange={(e) => setInstituteId(e.target.value)}
-                  >
-                    <option value="">Select School</option>
-                    {MOCK_INSTITUTES.map((inst) => (
-                      <option key={inst.id} value={inst.id}>{inst.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex flex-col">
-                  <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Bus Route</label>
-                  <select
-                    className="clay-input pr-4 bg-white cursor-pointer"
-                    value={busId}
-                    onChange={(e) => setBusId(e.target.value)}
-                  >
-                    <option value="">Select Bus Route</option>
-                    {MOCK_BUSES.map((bus) => (
-                      <option key={bus.id} value={bus.id}>{bus.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Phone and Roll No */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col">
-                  <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Phone Number</label>
-                  <div className="relative flex items-center">
-                    <Phone size={18} className="text-slate-400 absolute left-4 z-10" />
-                    <input
-                      type="tel"
-                      placeholder="e.g. +123456789"
-                      className="clay-input pl-11"
-                      value={phoneNo}
-                      onChange={(e) => setPhoneNo(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-col">
-                  <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Roll Number</label>
-                  <div className="relative flex items-center">
-                    <FileText size={18} className="text-slate-400 absolute left-4 z-10" />
-                    <input
-                      type="text"
-                      placeholder="e.g. ROLL-102"
-                      className="clay-input pl-11"
-                      value={rollNo}
-                      onChange={(e) => setRollNo(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Class Standard and Section */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col">
-                  <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Class/Standard</label>
-                  <input
-                    type="text"
-                    placeholder="e.g., Grade 10"
-                    className="clay-input"
-                    value={standard}
-                    onChange={(e) => setStandard(e.target.value)}
-                  />
-                </div>
-                <div className="flex flex-col">
-                  <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Section</label>
-                  <input
-                    type="text"
-                    placeholder="e.g., Sec A"
-                    className="clay-input"
-                    value={section}
-                    onChange={(e) => setSection(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              {/* Pickup Location Coords with GPS */}
-              <div className="flex flex-col gap-2 p-4 bg-slate-50 rounded-2xl border border-slate-100 shadow-[inset_1px_1px_3px_rgba(0,0,0,0.05)]">
-                <span className="text-[0.9rem] font-semibold text-clay-text-dark text-left font-friendly flex items-center gap-1">
-                  <MapPin size={16} className="text-clay-blue" /> Pickup Location Coordinates
-                </span>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[0.8rem] text-slate-500 block text-left mb-1">Latitude</label>
-                    <input 
-                      type="number" 
-                      step="any"
-                      placeholder="e.g. 26.8467" 
-                      className="clay-input py-2 text-sm bg-white"
-                      value={pickupLat}
-                      onChange={(e) => setPickupLat(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[0.8rem] text-slate-500 block text-left mb-1">Longitude</label>
-                    <input 
-                      type="number" 
-                      step="any"
-                      placeholder="e.g. 80.9462" 
-                      className="clay-input py-2 text-sm bg-white"
-                      value={pickupLng}
-                      onChange={(e) => setPickupLng(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleGetLocation}
-                  disabled={locationLoading}
-                  className="mt-2 text-xs font-bold text-clay-blue hover:text-clay-blue-dark flex items-center justify-center gap-1 self-center bg-white py-1.5 px-3 rounded-full border border-clay-blue/20 shadow-sm cursor-pointer active:scale-95 transition-all disabled:opacity-50"
-                >
-                  {locationLoading ? 'Fetching GPS...' : '🎯 Auto-detect my GPS Coords'}
-                </button>
-              </div>
-
-              {/* Email Verification OTP */}
-              <div className="flex flex-col gap-2 mt-1">
-                <label className="clay-label font-friendly font-semibold text-[0.95rem] text-clay-text-dark text-left">Email Verification OTP</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="6-digit OTP"
-                    maxLength={6}
-                    className="clay-input flex-1"
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSendOtp}
-                    disabled={sendingOtp || !email}
-                    className={`clay-btn text-xs py-2.5 px-4 rounded-xl whitespace-nowrap ${
-                      isOtpSent ? 'clay-btn-green text-white shadow-clay-green/30' : 'clay-btn-blue text-white shadow-clay-blue/30'
-                    } ${(!email || sendingOtp) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {sendingOtp ? 'Sending...' : isOtpSent ? 'Resend OTP 🔁' : 'Send OTP ✉️'}
-                  </button>
-                </div>
-                {!email && <span className="text-[0.8rem] text-clay-orange text-left font-semibold">Enter your email first to send OTP!</span>}
-              </div>
-            </>
-          )}
-
+          {/* Parent specific Child Name */}
           {role === 'parent' && (
             <div className="flex flex-col">
-              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Student ID to Track</label>
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Child's Name</label>
               <div className="relative flex items-center">
                 <GraduationCap size={18} className="text-slate-400 absolute left-4 z-10" />
                 <input
                   type="text"
-                  placeholder="e.g., STU-99482"
+                  placeholder="e.g. Timmy Jenkins"
                   className="clay-input pl-11"
-                  value={studentId}
-                  onChange={(e) => setStudentId(e.target.value)}
+                  value={childsName}
+                  onChange={(e) => setChildsName(e.target.value)}
                 />
               </div>
             </div>
           )}
 
-          {role === 'driver' && (
+          {/* Phone and Roll No */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="flex flex-col">
-              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Assigned Vehicle/Bus ID</label>
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">
+                {role === 'parent' ? 'Parent Phone Number' : 'Student Phone Number'}
+              </label>
               <div className="relative flex items-center">
-                <Shield size={18} className="text-slate-400 absolute left-4 z-10" />
+                <Phone size={18} className="text-slate-400 absolute left-4 z-10" />
+                <input
+                  type="tel"
+                  placeholder="e.g. 9876543210"
+                  className="clay-input pl-11"
+                  value={phoneNo}
+                  onChange={(e) => setPhoneNo(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex flex-col">
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">
+                {role === 'parent' ? "Child's Roll Number" : "Roll Number"}
+              </label>
+              <div className="relative flex items-center">
+                <FileText size={18} className="text-slate-400 absolute left-4 z-10" />
                 <input
                   type="text"
-                  placeholder="e.g., BUS-X78"
+                  placeholder="e.g. ROLL-101"
                   className="clay-input pl-11"
-                  value={driverBusId}
-                  onChange={(e) => setDriverBusId(e.target.value)}
+                  value={rollNo}
+                  onChange={(e) => setRollNo(e.target.value)}
                 />
+              </div>
+            </div>
+          </div>
+
+          {/* Class / Standard and Section */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex flex-col">
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">
+                {role === 'parent' ? "Child's Class / Grade" : "Class / Grade"}
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Grade 8"
+                className="clay-input"
+                value={standard}
+                onChange={(e) => setStandard(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col">
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">
+                Section
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. A"
+                className="clay-input"
+                value={section}
+                onChange={(e) => setSection(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Pickup Coordinates */}
+          <div className="flex flex-col gap-2 p-4 bg-slate-50 rounded-2xl border border-slate-100 shadow-[inset_1px_1px_3px_rgba(0,0,0,0.05)]">
+            <span className="text-[0.9rem] font-semibold text-clay-text-dark text-left font-friendly flex items-center gap-1">
+              <MapPin size={16} className="text-clay-blue" />
+              <span>Morning Pickup Coordinates</span>
+            </span>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[0.8rem] text-slate-500 block text-left mb-1">Latitude</label>
+                <input 
+                  type="number" 
+                  step="any"
+                  placeholder="e.g. 28.6139" 
+                  className="clay-input py-2 text-sm bg-white"
+                  value={pickupLat}
+                  onChange={(e) => setPickupLat(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-[0.8rem] text-slate-500 block text-left mb-1">Longitude</label>
+                <input 
+                  type="number" 
+                  step="any"
+                  placeholder="e.g. 77.2090" 
+                  className="clay-input py-2 text-sm bg-white"
+                  value={pickupLng}
+                  onChange={(e) => setPickupLng(e.target.value)}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleGetLocation}
+              disabled={locationLoading}
+              className="mt-2 text-xs font-bold text-clay-blue hover:text-clay-blue-dark flex items-center justify-center gap-1 self-center bg-white py-1.5 px-4 rounded-full border border-clay-blue/20 shadow-sm cursor-pointer active:scale-95 transition-all"
+            >
+              {locationLoading ? 'Fetching GPS...' : '🎯 Auto-detect my GPS Coords'}
+            </button>
+          </div>
+
+          {/* Student Email Verification OTP */}
+          {role === 'student' && (
+            <div className="flex flex-col gap-2 mt-1">
+              <label className="clay-label font-friendly font-semibold text-[0.95rem] text-clay-text-dark text-left">
+                Email Verification OTP Code
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="6-digit OTP"
+                  maxLength={6}
+                  className="clay-input flex-1"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={handleSendOtp}
+                  disabled={sendingOtp || !email}
+                  className={`clay-btn text-xs py-2.5 px-4 rounded-xl whitespace-nowrap ${
+                    isOtpSent ? 'clay-btn-green text-white' : 'clay-btn-blue text-white'
+                  }`}
+                >
+                  {sendingOtp ? 'Sending...' : isOtpSent ? 'Resend OTP 🔁' : 'Send OTP ✉️'}
+                </button>
               </div>
             </div>
           )}
 
           {/* Password Input */}
-          <div className="flex flex-col">
-            <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Create Password</label>
-            <div className="relative flex items-center">
-              <Lock size={18} className="text-slate-400 absolute left-4 z-10" />
-              <input
-                type="password"
-                placeholder="••••••••"
-                className="clay-input pl-11"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex flex-col">
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Password</label>
+              <div className="relative flex items-center">
+                <Lock size={18} className="text-slate-400 absolute left-4 z-10" />
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className="clay-input pl-11"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex flex-col">
+              <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Confirm</label>
+              <div className="relative flex items-center">
+                <Lock size={18} className="text-slate-400 absolute left-4 z-10" />
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className="clay-input pl-11"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                />
+              </div>
             </div>
           </div>
 
-          {/* Confirm Password Input */}
-          <div className="flex flex-col">
-            <label className="clay-label font-friendly font-semibold mb-2 text-[0.95rem] text-clay-text-dark text-left">Confirm Password</label>
-            <div className="relative flex items-center">
-              <Lock size={18} className="text-slate-400 absolute left-4 z-10" />
-              <input
-                type="password"
-                placeholder="••••••••"
-                className="clay-input pl-11"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* Submit button */}
+          {/* Action button */}
           <button 
             type="submit" 
             disabled={loading}
-            className={`clay-btn clay-btn-green w-full mt-2 py-3.5 rounded-2xl flex justify-center items-center gap-2 transition-all ${
+            className={`clay-btn clay-btn-blue w-full mt-2 py-3.5 rounded-2xl flex justify-center items-center gap-2 transition-all font-friendly font-bold text-base ${
               loading ? 'opacity-85 cursor-wait' : ''
             }`}
           >
             {loading ? (
               <span className="flex items-center gap-2">
-                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Syncing Notifications...
+                <RefreshCw size={18} className="animate-spin" />
+                <span>Registering Account...</span>
               </span>
             ) : (
               <>
                 <CheckCircle size={20} />
-                Register & Explore
+                <span>Create TrackMyBus Account</span>
               </>
             )}
           </button>
@@ -577,9 +618,9 @@ function Register({ setCurrentPage, setIsLoggedIn, setUserRole }) {
           <span className="text-clay-text-muted font-clean">Already have an account? </span>
           <button 
             className="border-none bg-transparent text-clay-blue text-[0.9rem] font-bold cursor-pointer font-friendly hover:underline" 
-            onClick={() => setCurrentPage('login')}
+            onClick={() => navigate('/login')}
           >
-            <ArrowLeft size={14} className="mr-1 inline-block" /> Sign In
+            Log in here <ArrowRight size={14} className="ml-1 inline-block" />
           </button>
         </div>
       </div>
