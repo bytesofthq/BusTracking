@@ -26,5 +26,9 @@ router.get('/:id/live-location', authorize('admin', 'parent', 'driver', 'student
 router.get('/:id/optimized-route', authorize('admin', 'parent', 'driver', 'student'), busController.getOptimizedRouteForBus);
 router.get('/:id', authorize('admin', 'parent', 'driver', 'student'), busController.getBus);
 router.get('/:id/with-driver', authorize('admin', 'parent', 'student'), busController.getBusWithDriver);
+// Routes with ID parameter
+router.get('/:id', authorize('admin', 'parent', 'driver'), busController.getBus);
+router.get('/:id/with-driver', authorize('admin', 'parent'), busController.getBusWithDriver);
+router.get('/:id/optimal-route', authorize('admin', 'driver'), busController.getOptimalDailyRoute);
 
 module.exports = router;

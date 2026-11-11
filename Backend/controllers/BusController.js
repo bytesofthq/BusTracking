@@ -851,4 +851,4 @@ exports.getOptimizedRouteForBus = catchAsync(async (req, res, next) => {
         absentStudents: absentStudents,
         geojson: geojson
     });
-});
+});
